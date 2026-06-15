@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { User } from 'firebase/auth';
 import { initAuth, googleSignIn, logout } from './lib/auth';
-import { ROOMS } from './data';
 import { Room } from './types';
+import {
+  authAPI,
+  roomsAPI,
+  bookingsAPI,
+  adminAPI,
+  analyticsAPI,
+  notificationsAPI,
+  setSessionToken,
+  getSessionToken
+} from './lib/api';
+import { supabase, isSupabaseConfigured, subscribeToSupabaseErrors } from './lib/supabaseClient';
 
 // Components
 import CalendarWidget from './components/CalendarWidget';
@@ -12,6 +21,24 @@ import ChatWidget from './components/ChatWidget';
 import FormsWidget from './components/FormsWidget';
 import OccupancyChart from './components/OccupancyChart';
 import QRCodeSVG from './components/QRCodeSVG';
+import { AIWidget } from './components/AIWidget';
+
+// Recharts for statistical graphs
+import {
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell
+} from 'recharts';
 
 // Icons
 import {
@@ -28,7 +55,6 @@ import {
   MapPin,
   Clock,
   CheckCircle,
-  HelpCircle,
   Clock3,
   SlidersHorizontal,
   Filter,
@@ -36,19 +62,103 @@ import {
   RotateCcw,
   Search,
   Download,
-  ArrowUpDown
+  ArrowUpDown,
+  Lock,
+  Plus,
+  Shield,
+  Activity,
+  Trash2,
+  AlertTriangle,
+  UserCheck,
+  Award,
+  Link2,
+  TrendingUp,
+  Sliders,
+  Bell,
+  CheckSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
+
+interface WorkspaceGateProps {
+  activeTab: string;
+  isIframe: boolean;
+  onLink: () => void;
+}
+
+function WorkspaceGate({ activeTab, isIframe, onLink }: WorkspaceGateProps) {
+  return (
+    <div className="max-w-xl mx-auto my-12 p-8 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-6 relative overflow-hidden">
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="w-16 h-16 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto border border-indigo-500/20">
+        <Link2 className="w-8.5 h-8.5 text-indigo-400 animate-pulse" />
+      </div>
+      <div className="space-y-2 relative z-10">
+        <h2 className="text-xl font-bold tracking-tight text-white capitalize">Google {activeTab} Sync Desk</h2>
+        <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
+          Access to the {activeTab} workspace and real-time smart integration features requires you to link and synchronize your authenticated Google credentials.
+        </p>
+      </div>
+
+      <button
+        onClick={onLink}
+        className="w-full py-3 bg-indigo-600 hover:bg-indigo-505 text-white font-semibold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer relative z-10 mx-auto"
+      >
+        <Link2 className="w-4 h-4" />
+        <span>Link Google Workspace Now</span>
+      </button>
+
+      {isIframe && (
+        <div className="bg-amber-950/40 border border-amber-900/40 p-5 rounded-2xl text-left space-y-2 relative z-10 mt-4">
+          <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5 font-mono uppercase tracking-wider">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Iframe Sandbox Warning</span>
+          </div>
+          <p className="text-[10.5px] leading-relaxed text-amber-400/80">
+            Since this application is loaded inside an iframe on <strong>Google AI Studio</strong>, your browser's security blocks standard Google login popup windows by default.
+          </p>
+          <div className="p-2.5 bg-amber-950/60 rounded-xl border border-amber-850/20 text-[10.5px] font-semibold text-amber-250 leading-relaxed">
+            💡 <strong>Solution:</strong> Look at the <strong>toolbar / tabs in Google AI Studio</strong> (top right) and click the <strong>"Open in New Tab"</strong> button. Linking and synchronizing will work perfectly from there!
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  // DB & Auth states
+  const [user, setUser] = useState<any>(null);
   const [token, setToken] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [activeTab, setActiveTab] = useState<'rooms' | 'calendar' | 'drive' | 'gmail' | 'chat' | 'forms'>('rooms');
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
 
-  // Rooms list state
-  const [rooms, setRooms] = useState<Room[]>(ROOMS);
+  // Form states for login/signup
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [registerEmail, setRegisterEmail] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registerName, setRegisterName] = useState('');
+  const [registerRole, setRegisterRole] = useState<'student' | 'faculty' | 'admin'>('student');
+
+  // Google Workspace account bind state
+  const [googleWorkspaceLinked, setGoogleWorkspaceLinked] = useState(false);
+  const [googleProfile, setGoogleProfile] = useState<any>(null);
+  const [isIframe, setIsIframe] = useState(false);
+
+  useEffect(() => {
+    setIsIframe(window.self !== window.top);
+  }, []);
+
+  // Active workspace states
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [activeTab, setActiveTab] = useState<'rooms' | 'calendar' | 'drive' | 'gmail' | 'chat' | 'forms' | 'analytics' | 'admin' | 'ai'>('rooms');
+
+  // Notifications states
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // Filters state for Rooms Directory
   const [minCapacity, setMinCapacity] = useState<number>(0);
@@ -65,125 +175,36 @@ export default function App() {
   const [gmailLog, setGmailLog] = useState<{ to: string; subject: string; body: string; time: string }[]>([]);
 
   // Action feedback Toast state
-  const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'info' }[]>([]);
+  const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'info' | 'error' }[]>([]);
 
   // Selected Room for Scannable QR Modal
   const [selectedQRRoom, setSelectedQRRoom] = useState<Room | null>(null);
   const [isScanningSimulated, setIsScanningSimulated] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
 
-  const addToast = (message: string, type: 'success' | 'info' = 'success') => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4500);
-  };
+  // Admin section lists
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [adminBookings, setAdminBookings] = useState<any[]>([]);
 
-  const triggerFastCheckIn = (room: Room) => {
-    // 1. Flip room state to booked
-    setRooms((prev) =>
-      prev.map((r) => (r.id === room.id ? { ...r, status: 'booked' } : r))
-    );
+  // Admin New Room form
+  const [adminRoomName, setAdminRoomName] = useState('');
+  const [adminRoomCapacity, setAdminRoomCapacity] = useState(30);
+  const [adminRoomFeatures, setAdminRoomFeatures] = useState('');
+  const [adminRoomImage, setAdminRoomImage] = useState('');
+  const [adminRoomColor, setAdminRoomColor] = useState('from-slate-700 to-slate-900');
 
-    // 2. Add an announcement in Chat
-    const timestampStr = new Date().toLocaleTimeString();
-    const checkInMessage = `📢 QR Sensor Check-In: ${user?.displayName || 'Verified User'} has successfully checked into "${room.name}" (Seats: ${room.capacity}) via QR code scanner. Space status: [OCCUPIED]`;
-    setChatLog((prev) => [
-      {
-        space: 'Sandbox Chat Space',
-        text: checkInMessage,
-        time: timestampStr,
-      },
-      ...prev,
-    ]);
+  // Deep Analytics stats
+  const [analyticsStats, setAnalyticsStats] = useState<any>(null);
 
-    // 3. Add an email alert inside Gmail
-    const emailSubject = `[QR Check-In Alert] Live Space Registration: ${room.name} occupies`;
-    const emailBody = `Hello Office Operations,\n\nThis is an automated sensory trace report.\n\n${user?.displayName || 'Verified User'} (${user?.email || 'pathaksrishti2208@gmail.com'}) has arrived and scanned the physical room QR plaque at "${room.name}" (Capacity: ${room.capacity}).\n\nThe scheduler status for this space has been forced to [OCCUPIED] with instant cross-workspace alerts active. To view live logs, consult the scheduler dashboard.\n\nBest,\nIntegrated Workspace Sensor Engine`;
-    setGmailLog((prev) => [
-      {
-        to: 'workspace-alerts@company.com',
-        subject: emailSubject,
-        body: emailBody,
-        time: timestampStr,
-      },
-      ...prev,
-    ]);
+  // Current local live formatted clock
+  const [currentTime, setCurrentTime] = useState('');
 
-    // 4. Trigger localized Toast
-    addToast(`⚡ Rapid Check-In complete for ${room.name}! Dispatching Workspace alerts.`);
-  };
-
-  // Matches room features against short toggle codes
-  const matchesFeature = (room: Room, f: string) => {
-    const normFeatures = room.features.map(feat => feat.toLowerCase());
-    if (f === 'Projector') {
-      return normFeatures.some(feat => feat.includes('projector'));
-    }
-    if (f === 'Whiteboard') {
-      return normFeatures.some(feat => feat.includes('whiteboard'));
-    }
-    if (f === 'Display/Screen') {
-      return normFeatures.some(feat => feat.includes('display') || feat.includes('screen'));
-    }
-    if (f === 'Audio/Video') {
-      return normFeatures.some(feat => feat.includes('audio') || feat.includes('conferencing'));
-    }
-    if (f === 'Ergonomics/Seating') {
-      return normFeatures.some(feat => feat.includes('seating') || feat.includes('chair') || feat.includes('desk') || feat.includes('sofa'));
-    }
-    return false;
-  };
-
-  const filteredRooms = useMemo(() => {
-    const list = rooms.filter((room) => {
-      if (room.capacity < minCapacity) return false;
-      for (const f of selectedFeatureToggles) {
-        if (!matchesFeature(room, f)) return false;
-      }
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase().trim();
-        const matchesName = room.name.toLowerCase().includes(query);
-        const matchesFeatureDescription = room.features.some((feature) =>
-          feature.toLowerCase().includes(query)
-        );
-        if (!matchesName && !matchesFeatureDescription) {
-          return false;
-        }
-      }
-      return true;
-    });
-
-    if (sortKey === 'capacity-asc') {
-      list.sort((a, b) => a.capacity - b.capacity);
-    } else if (sortKey === 'capacity-desc') {
-      list.sort((a, b) => b.capacity - a.capacity);
-    } else if (sortKey === 'available-first') {
-      list.sort((a, b) => {
-        const priority = { available: 0, expiring_soon: 1, booked: 2 };
-        return priority[a.status] - priority[b.status];
-      });
-    } else if (sortKey === 'booked-first') {
-      list.sort((a, b) => {
-        const priority = { booked: 0, expiring_soon: 1, available: 2 };
-        return priority[a.status] - priority[b.status];
-      });
-    }
-
-    return list;
-  }, [rooms, minCapacity, selectedFeatureToggles, searchQuery, sortKey]);
-
-  // Tracks newly created bookings in this session so that DriveWidget can save/export receipts dynamically
   const [sessionReceipts, setSessionReceipts] = useState<
     { roomName: string; summary: string; start: string; end: string; agenda?: string }[]
   >([]);
 
-  // Current local formatted time display
-  const [currentTime, setCurrentTime] = useState('');
-
+  // Live timer tick
   useEffect(() => {
-    // 1-second interval clock
     const updateTime = () => {
       const now = new Date();
       setCurrentTime(
@@ -197,74 +218,385 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Sync state with local storage tokens on load
   useEffect(() => {
-    // Init Firebase Auth observer
-    initAuth(
-      (currentUser, accessToken) => {
-        setUser(currentUser);
-        setToken(accessToken);
-        setNeedsAuth(false);
-      },
-      () => {
+    async function checkSession() {
+      const storedToken = getSessionToken();
+      if (storedToken) {
+        try {
+          setToken(storedToken);
+          const meResponse = await authAPI.getMe();
+          setUser(meResponse.user);
+          setNeedsAuth(false);
+          setGoogleWorkspaceLinked(!!sessionStorage.getItem('google_workspace_access_token'));
+          fetchDashboardModels(meResponse.user.role);
+        } catch (err) {
+          console.warn('Session expired. Taking you back to login portal:', err);
+          setSessionToken(null);
+          setNeedsAuth(true);
+        }
+      } else {
         setNeedsAuth(true);
       }
-    );
+    }
+    checkSession();
   }, []);
 
-  const handleLogin = async () => {
+  const addToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4500);
+  };
+
+  // Register centralized error listener for Supabase cloud queries and network operations failures
+  useEffect(() => {
+    const unsubscribe = subscribeToSupabaseErrors((message) => {
+      addToast(message, 'error');
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  const fetchDashboardModels = async (role: string) => {
+    try {
+      // 1. Fetch live rooms
+      const list = await roomsAPI.list();
+      setRooms(list);
+
+      // 2. Fetch live bookings
+      const bookings = await bookingsAPI.list();
+      setAdminBookings(bookings);
+
+      // 3. Fetch analytics
+      const stats = await analyticsAPI.getStats();
+      setAnalyticsStats(stats);
+
+      // 4. Fetch admin users state
+      if (role === 'admin') {
+        const uList = await adminAPI.listUsers();
+        setAdminUsers(uList);
+      }
+
+      // 5. Fetch live notifications
+      try {
+        const notifList = await notificationsAPI.list();
+        setNotifications(notifList);
+      } catch (ne) {
+        console.warn('Could not populate live notifications:', ne);
+      }
+    } catch (err: any) {
+      console.error('Failed loading resources:', err);
+    }
+  };
+
+  const handleMarkNotificationsRead = async () => {
+    try {
+      await notificationsAPI.markAllRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch (err) {
+      console.warn('Failed marking notifications read:', err);
+    }
+  };
+
+  // Poll for background notification updates to keep state synced without manual reloads
+  useEffect(() => {
+    if (!token) return;
+    const intervalIdx = setInterval(() => {
+      notificationsAPI.list()
+        .then((notifList) => {
+          setNotifications(notifList);
+        })
+        .catch(() => {});
+    }, 8000);
+    return () => clearInterval(intervalIdx);
+  }, [token]);
+
+  // Realtime Supabase Subscription to keep lists synchronized instantly
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || !token || !user) return;
+
+    console.log('⚡ Establishing live Supabase Realtime subscriptions...');
+
+    // 1. Subscribe to Bookings Table
+    const bookingsChannel = supabase
+      .channel('realtime:bookings')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        (payload) => {
+          console.log('🔔 Realtime Bookings Update witnessed:', payload);
+          // Reload all state modules
+          fetchDashboardModels(user.role);
+
+          // Render live feedback / announcements depending on mutation event
+          if (payload.eventType === 'INSERT') {
+            const b = payload.new;
+            addToast(`Room Bound: "${b.room_name || 'Room'}" booked for "${b.summary}"`, 'success');
+          } else if (payload.eventType === 'DELETE') {
+            addToast('A booking reservation has been cancelled.', 'info');
+          } else if (payload.eventType === 'UPDATE') {
+            addToast('Booking status or info has been updated.', 'info');
+          }
+        }
+      )
+      .subscribe();
+
+    // 2. Subscribe to Rooms Table
+    const roomsChannel = supabase
+      .channel('realtime:rooms')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rooms' },
+        (payload) => {
+          console.log('🔔 Realtime Rooms Update witnessed:', payload);
+          fetchDashboardModels(user.role);
+          if (payload.eventType === 'UPDATE') {
+            addToast(`Room attributes updated: "${payload.new.name || 'Room'}"`, 'info');
+          }
+        }
+      )
+      .subscribe();
+
+    // 3. Subscribe to Notifications Table
+    const notificationsChannel = supabase
+      .channel('realtime:notifications')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications' },
+        (payload) => {
+          console.log('🔔 Realtime Notifications Update witnessed:', payload);
+          if (payload.eventType === 'INSERT') {
+            // Append the new notification to state immediately
+            setNotifications((prev) => [payload.new, ...prev].slice(0, 50));
+            addToast(`System Notification: ${payload.new.title}`, 'info');
+          } else {
+            // Hot reload full notification panel
+            notificationsAPI.list()
+              .then((list) => setNotifications(list))
+              .catch(() => {});
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      console.log('⚡ Cleaned up live Supabase Realtime subscriptions.');
+      supabase.removeChannel(bookingsChannel);
+      supabase.removeChannel(roomsChannel);
+      supabase.removeChannel(notificationsChannel);
+    };
+  }, [token, user?.role, isSupabaseConfigured]);
+
+  // ==========================================
+  // SIGN IN & REGISTRATION CONTROLLERS
+  // ==========================================
+  const handleCredentialsLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
     setIsLoggingIn(true);
     try {
-      const result = await googleSignIn();
-      if (result) {
-        setToken(result.accessToken);
-        setUser(result.user);
-        setNeedsAuth(false);
-      }
-    } catch (err) {
-      console.error('Sign in failed:', err);
+      const response = await authAPI.login({ email: loginEmail, password: loginPassword });
+      setSessionToken(response.token, true);
+      setUser(response.user);
+      setToken(response.token);
+      setNeedsAuth(false);
+      addToast(`Access granted! Welcome, ${response.user.name}.`, 'success');
+      fetchDashboardModels(response.user.role);
+    } catch (err: any) {
+      addToast(err.message || 'Incorrect login coordinates.', 'info');
     } finally {
       setIsLoggingIn(false);
     }
   };
 
-  const handleSignout = async () => {
-    const confirmed = window.confirm('Are you sure you want to sign out of the Smart Room Scheduler?');
-    if (!confirmed) return;
-    await logout();
-    setUser(null);
-    setToken(null);
-    setNeedsAuth(true);
+  const handleCredentialsRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoggingIn(true);
+    try {
+      const response = await authAPI.register({
+        email: registerEmail.toLowerCase(),
+        password: registerPassword,
+        name: registerName,
+        role: registerRole
+      });
+      setSessionToken(response.token, true);
+      setUser(response.user);
+      setToken(response.token);
+      setNeedsAuth(false);
+      addToast(`Account registered successfully. Custom role assigned: ${response.user.role}`, 'success');
+      fetchDashboardModels(response.user.role);
+    } catch (err: any) {
+      addToast(err.message || 'Registration failed.', 'info');
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
-  const syncRoomsStatusFromCalendar = () => {
-    // Random status flippage simulation to indicate real synchronization & live monitoring
-    setRooms((prev) =>
-      prev.map((r, i) => {
-        const rand = Math.random();
-        let status: 'available' | 'booked' | 'expiring_soon' = 'available';
-        if (rand > 0.7) {
-          status = 'booked';
-        } else if (rand > 0.45) {
-          status = 'expiring_soon';
-        }
-        return {
-          ...r,
-          status,
-        };
-      })
-    );
+  const handleSignout = () => {
+    const confirm = window.confirm('Are you sure you want to exit the scheduling office?');
+    if (!confirm) return;
+    setSessionToken(null);
+    sessionStorage.removeItem('google_workspace_access_token');
+    setUser(null);
+    setToken(null);
+    setGoogleWorkspaceLinked(false);
+    setNeedsAuth(true);
+    addToast('Credentials session closed safely.', 'info');
   };
+
+  const linkGoogleWorkspaceAccount = async () => {
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        sessionStorage.setItem('google_workspace_access_token', result.accessToken);
+        setGoogleProfile(result.user);
+        setGoogleWorkspaceLinked(true);
+        addToast('Google Workspace authentication linked! Active widgets enabled.', 'success');
+      }
+    } catch (err: any) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : 'Popup blocker active or login dismissed.';
+      addToast(msg, 'info');
+    }
+  };
+
+  const triggerFastCheckIn = (room: Room) => {
+    // 1. Flip room state to booked visually
+    setRooms((prev) =>
+      prev.map((r) => (r.id === room.id ? { ...r, status: 'booked' } : r))
+    );
+
+    // 2. Add announcement in Chat
+    const timestampStr = new Date().toLocaleTimeString();
+    const checkInMessage = `📢 QR Mobile Sensor Check-In: ${user?.name || 'Authorized User'} has checked in to "${room.name}" via QR placa reader. DB status marked: [OCCUPIED]`;
+    setChatLog((prev) => [
+      {
+        space: 'General Space Alerts',
+        text: checkInMessage,
+        time: timestampStr,
+      },
+      ...prev,
+    ]);
+
+    // 3. Add email log list
+    const emailSubject = `[Live Sensor Alert] Desk Checked: ${room.name}`;
+    const emailBody = `Automated check-in trace at IIT BHU.\n\nUser ${user?.name} has authorized check-in utilizing the dynamic QR generator. Space status is now reserved in SQL schemas.`;
+    setGmailLog((prev) => [
+      {
+        to: 'classroom-mgmt@iitbhu.ac.in',
+        subject: emailSubject,
+        body: emailBody,
+        time: timestampStr,
+      },
+      ...prev,
+    ]);
+
+    addToast(`⚡ RAPID Check-In success for ${room.name}!`);
+  };
+
+  // ==========================================
+  // ROOM INVENTORY ADD/EDIT (Admin Role)
+  // ==========================================
+  const handleAdminAddRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        name: adminRoomName,
+        capacity: Number(adminRoomCapacity),
+        features: adminRoomFeatures.split(',').map(f => f.trim()).filter(Boolean),
+        image: adminRoomImage || undefined,
+        color: adminRoomColor
+      };
+      await roomsAPI.create(payload);
+      addToast(`New space "${adminRoomName}" created successfully!`, 'success');
+      setAdminRoomName('');
+      setAdminRoomFeatures('');
+      fetchDashboardModels(user.role);
+    } catch (err: any) {
+      alert(`Admin operation error: ${err.message}`);
+    }
+  };
+
+  const handleAdminDeleteRoom = async (id: string, name: string) => {
+    const approved = window.confirm(`Permanently decommission "${name}"? This deletes all associated bookings.`);
+    if (!approved) return;
+    try {
+      await roomsAPI.delete(id);
+      addToast(`Space ${name} decommissioned from database.`, 'success');
+      fetchDashboardModels(user.role);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleAdminUpdateUserRole = async (userId: string, targetRole: string) => {
+    try {
+      await adminAPI.updateUserRole(userId, targetRole);
+      addToast('User organizational authorization level changed.', 'success');
+      fetchDashboardModels(user.role);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // ==========================================
+  // FILTERS AND SEARCH
+  // ==========================================
+  const matchesFeature = (room: Room, f: string) => {
+    const normFeatures = room.features.map(feat => feat.toLowerCase());
+    if (f === 'Projector') return normFeatures.some(feat => feat.includes('projector') || feat.includes('laser'));
+    if (f === 'Whiteboard') return normFeatures.some(feat => feat.includes('whiteboard'));
+    if (f === 'Display/Screen') return normFeatures.some(feat => feat.includes('display') || feat.includes('screen') || feat.includes('projection'));
+    if (f === 'Audio/Video') return normFeatures.some(feat => feat.includes('audio') || feat.includes('conferencing') || feat.includes('surround'));
+    if (f === 'Ergonomics/Seating') return normFeatures.some(feat => feat.includes('seating') || feat.includes('chair') || feat.includes('boardroom'));
+    return false;
+  };
+
+  const filteredRooms = useMemo(() => {
+    const list = [...rooms];
+    const filtered = list.filter((room) => {
+      if (room.capacity < minCapacity) return false;
+      for (const f of selectedFeatureToggles) {
+        if (!matchesFeature(room, f)) return false;
+      }
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase().trim();
+        const matchesName = room.name.toLowerCase().includes(query);
+        const matchesFeatureDescription = room.features.some((feature) =>
+          feature.toLowerCase().includes(query)
+        );
+        if (!matchesName && !matchesFeatureDescription) return false;
+      }
+      return true;
+    });
+
+    if (sortKey === 'capacity-asc') {
+      filtered.sort((a, b) => a.capacity - b.capacity);
+    } else if (sortKey === 'capacity-desc') {
+      filtered.sort((a, b) => b.capacity - a.capacity);
+    } else if (sortKey === 'available-first') {
+      filtered.sort((a, b) => {
+        const priority = { available: 0, expiring_soon: 1, booked: 2 };
+        return priority[a.status] - priority[b.status];
+      });
+    } else if (sortKey === 'booked-first') {
+      filtered.sort((a, b) => {
+        const priority = { booked: 0, expiring_soon: 1, available: 2 };
+        return priority[a.status] - priority[b.status];
+      });
+    }
+    return filtered;
+  }, [rooms, minCapacity, selectedFeatureToggles, searchQuery, sortKey]);
 
   const handleDownloadCSV = () => {
     const escapeCSV = (val: string | number) => {
       const str = String(val).replace(/"/g, '""');
-      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-        return `"${str}"`;
-      }
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) return `"${str}"`;
       return str;
     };
-
-    const headers = ['Room ID', 'Room Name', 'Capacity (Seats)', 'Status', 'Amenities / Features'];
+    const headers = ['Room ID', 'Room Name', 'Capacity (Seats)', 'Status', 'Features List'];
     const rows = filteredRooms.map((room) => [
       room.id,
       room.name,
@@ -272,7 +604,6 @@ export default function App() {
       room.status,
       room.features.join('; '),
     ]);
-
     const csvContent = [
       headers.map(escapeCSV).join(','),
       ...rows.map((row) => row.map(escapeCSV).join(',')),
@@ -282,88 +613,74 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `rooms_directory_export_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
+    link.setAttribute('download', `iit_bhu_rooms_directory_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
   const handleNewBookingRegistered = (roomName: string, summary: string, start: string, end: string, agenda?: string) => {
-    // Add to session receipt list
-    setSessionReceipts((prev) => [
-      ...prev,
-      {
-        roomName,
-        summary,
-        start,
-        end,
-        agenda,
-      },
-    ]);
-
-    // Flip targeted room's state to booked
-    setRooms((prev) =>
-      prev.map((r) => (r.name === roomName ? { ...r, status: 'booked' } : r))
-    );
-
-    // Synchronize automatic chat and email notifications for this booking
-    const timestampStr = new Date().toLocaleTimeString();
+    setSessionReceipts((prev) => [...prev, { roomName, summary, start, end, agenda }]);
     
-    const blockStartStr = new Date(start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const blockEndStr = new Date(end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const formattedDate = new Date(start).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-
-    // 1. Post Chat notice
-    const chatMsg = `📅 Reservation Approved: "${summary}" has locked room "${roomName}" on ${formattedDate} [${blockStartStr} - ${blockEndStr}] by faculty member ${user?.displayName || 'Authorized User'}.`;
+    // Add dynamically to logs
+    const timestampStr = new Date().toLocaleTimeString();
     setChatLog((prev) => [
       {
-        space: 'Sandbox Chat Space',
-        text: chatMsg,
-        time: timestampStr,
+        space: 'General Space Alerts',
+        text: `📅 APPROVED: ${summary} has reserved Room: "${roomName}" from ${new Date(start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${new Date(end).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
+        time: timestampStr
       },
-      ...prev,
+      ...prev
     ]);
 
-    // 2. Post Gmail alert log
-    const emailSubject = `[Booking Confirmed] IIT BHU Workspace Allocation: ${roomName}`;
-    const emailBody = `Dear Faculty Member,\n\nThis is to confirm that your booking request has been successfully scheduled on your primary Google Calendar: \n\n- Allocation Space: ${roomName}\n- Title/Agenda: ${summary}\n- Date: ${formattedDate}\n- Block: ${blockStartStr} - ${blockEndStr}\n\nAny lecture slide attachments or guides can be uploaded directly to the logs in your Google Drive tab.\n\nBest regards,\nIIT BHU Smart Room Scheduler`;
     setGmailLog((prev) => [
       {
-        to: user?.email || 'faculty.office@iitbhu.ac.in',
-        subject: emailSubject,
-        body: emailBody,
-        time: timestampStr,
+        to: user?.email,
+        subject: `[Booking Confirmed] Space Reserved: ${roomName}`,
+        body: `Hello ${user?.name},\n\nYour session reservation coordinates have been secured in our relational database schemas for classroom ${roomName}. You can view receipts in your active dashboard.`,
+        time: timestampStr
       },
-      ...prev,
+      ...prev
     ]);
 
-    // 3. Trigger Toast notification
-    addToast(`📅 Successfully scheduled "${summary}" in ${roomName}! Saved receipt in Drive options.`);
+    addToast(`Space reservation secured!`, 'success');
+    fetchDashboardModels(user.role);
   };
 
-  // Login Gate
+  const syncRoomsStatusFromCalendar = () => {
+    addToast('Synchronizing database models...', 'success');
+    fetchDashboardModels(user.role);
+  };
+
+  // Prepopulate form triggers
+  const fillPredefinedCredentials = (role: 'admin' | 'faculty' | 'student') => {
+    if (role === 'admin') {
+      setLoginEmail('admin@iitbhu.ac.in');
+      setLoginPassword('admin123');
+    } else if (role === 'faculty') {
+      setLoginEmail('faculty@iitbhu.ac.in');
+      setLoginPassword('faculty123');
+    } else {
+      setLoginEmail('student@iitbhu.ac.in');
+      setLoginPassword('student123');
+    }
+  };
+
+  // ==========================================
+  // VIEW RENDER Gate
+  // ==========================================
   if (needsAuth || !user) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col justify-between p-6 text-white relative overflow-hidden font-sans">
-        {/* Artistic background blur elements */}
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-teal-600/10 rounded-full blur-3xl pointer-events-none" />
 
-        {/* Decorative corner status display */}
-        <div className="self-end text-right font-mono text-xs text-slate-500 flex items-center gap-1">
-          <Clock3 className="w-3.5 h-3.5" />
-          <span>Local: {currentTime || 'Loading...'}</span>
+        <div className="self-end text-right font-mono text-xs text-slate-500 flex items-center gap-1.5 pt-2">
+          <Clock3 className="w-3.5 h-3.5 text-indigo-400" />
+          <span>BHU Office Clock: {currentTime || 'Loading...'}</span>
         </div>
 
-        {/* Core Entry UI Card */}
-        <div className="max-w-xl w-full mx-auto my-auto bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10">
-          <div className="flex justify-center mb-6">
-            <div className="bg-gradient-to-tr from-indigo-500 to-violet-600 p-4 rounded-2xl shadow-lg border border-indigo-400/20">
-              <Sparkles className="w-8 h-8 text-white animate-pulse" />
-            </div>
-          </div>
-
+        <div className="max-w-xl w-full mx-auto my-auto bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10 space-y-6">
           <div className="text-center space-y-3">
             <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono">
               Indian Institute of Technology (BHU) Varanasi
@@ -371,143 +688,322 @@ export default function App() {
             <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
               IIT BHU Smart Room Scheduler
             </h1>
-            <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed font-normal">
-              A high-precision real-time scheduling dashboard syncing academic rooms and lecture halls with Google Accounts for faculty members.
+            <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+              Full-Stack Room Scheduler with Role-Based Access Control, Persistent PostgreSQL, and optional Google Workspace integrations.
             </p>
           </div>
 
-          {/* Quick Features Highlight */}
-          <div className="grid grid-cols-2 gap-4 my-8">
-            <div className="p-4 bg-slate-950/60 rounded-2xl border border-slate-850/40 space-y-1">
-              <Calendar className="w-5 h-5 text-indigo-400" />
-              <strong className="text-xs text-slate-200 block font-semibold">Google Calendar</strong>
-              <span className="text-[10px] text-slate-500 block">Live sync reservations</span>
-            </div>
-            <div className="p-4 bg-slate-950/60 rounded-2xl border border-slate-850/40 space-y-1">
-              <Mail className="w-5 h-5 text-indigo-400" />
-              <strong className="text-xs text-slate-200 block font-semibold">Gmail Alerts</strong>
-              <span className="text-[10px] text-slate-500 block">Instant team notifications</span>
-            </div>
-            <div className="p-4 bg-slate-950/60 rounded-2xl border border-slate-850/40 space-y-1">
-              <HardDrive className="w-5 h-5 text-teal-400" />
-              <strong className="text-xs text-slate-200 block font-semibold">Google Drive Attachment</strong>
-              <span className="text-[10px] text-slate-500 block">Secure booking HTML logs</span>
-            </div>
-            <div className="p-4 bg-slate-950/60 rounded-2xl border border-slate-850/40 space-y-1">
-              <MessageSquare className="w-5 h-5 text-indigo-400" />
-              <strong className="text-xs text-slate-200 block font-semibold">Google Chat</strong>
-              <span className="text-[10px] text-slate-500 block">Post team announcements</span>
+          {/* Tester Helper Cards */}
+          <div className="p-3 bg-slate-950/80 rounded-xl border border-indigo-900/40 space-y-2">
+            <span className="text-[9px] font-bold text-indigo-300 uppercase tracking-widest block font-mono">
+              ⚡ Quick Tester Profiles (Click to prefill coordinates):
+            </span>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => fillPredefinedCredentials('admin')}
+                className="bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-800/40 text-[10px] font-semibold text-indigo-200 py-1 px-2 rounded-lg transition-all"
+              >
+                Prof. Rajeev (Admin)
+              </button>
+              <button
+                type="button"
+                onClick={() => fillPredefinedCredentials('faculty')}
+                className="bg-teal-950/40 hover:bg-teal-900/50 border border-teal-800/40 text-[10px] font-semibold text-teal-200 py-1 px-2 rounded-lg transition-all"
+              >
+                Dr. S. K. (Faculty)
+              </button>
+              <button
+                type="button"
+                onClick={() => fillPredefinedCredentials('student')}
+                className="bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/40 text-[10px] font-semibold text-amber-200 py-1 px-2 rounded-lg transition-all"
+              >
+                Abishek (Student User)
+              </button>
             </div>
           </div>
 
-          {/* Styled Material Sign in button */}
-          <div className="flex justify-center">
+          {/* Custom Tabs */}
+          <div className="flex border-b border-slate-800">
             <button
-              onClick={handleLogin}
-              disabled={isLoggingIn}
-              className="group flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-900 border border-slate-200 font-bold text-sm px-6 py-3 rounded-xl shadow-lg transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 cursor-pointer"
+              onClick={() => setIsRegisterMode(false)}
+              className={`flex-1 text-center py-2 text-xs font-bold uppercase transition-all ${
+                !isRegisterMode ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'
+              }`}
             >
-              {isLoggingIn ? (
-                <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-5 h-5 shrink-0 block">
-                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                </svg>
-              )}
-              {isLoggingIn ? 'Connecting API...' : 'Sign in & Connect Google Workspace'}
+              Credentials Sign In
+            </button>
+            <button
+              onClick={() => setIsRegisterMode(true)}
+              className={`flex-1 text-center py-2 text-xs font-bold uppercase transition-all ${
+                isRegisterMode ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              Create Account
             </button>
           </div>
+
+          <AnimatePresence mode="wait">
+            {!isRegisterMode ? (
+              <motion.form
+                key="login-form"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                onSubmit={handleCredentialsLogin}
+                className="space-y-4"
+              >
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Email Coordinates</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. faculty@iitbhu.ac.in"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Account Secret Password</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isLoggingIn}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm py-2.5 rounded-xl transition-all shadow-lg text-center"
+                >
+                  {isLoggingIn ? 'Logging you in...' : 'Sign In Now'}
+                </button>
+              </motion.form>
+            ) : (
+              <motion.form
+                key="register-form"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                onSubmit={handleCredentialsRegister}
+                className="space-y-4"
+              >
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Your Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Dr. A.K. Tripathi"
+                    value={registerName}
+                    onChange={(e) => setRegisterName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">IIT Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. tripathi.cs@iitbhu.ac.in"
+                    value={registerEmail}
+                    onChange={(e) => setRegisterEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Create Password</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Minimum 6 characters"
+                    value={registerPassword}
+                    onChange={(e) => setRegisterPassword(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Desired Status Role</label>
+                  <select
+                    value={registerRole}
+                    onChange={(e: any) => setRegisterRole(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="student">Student Account (Role constraints apply)</option>
+                    <option value="faculty">Faculty Member (Authorization to Reserv rooms)</option>
+                    <option value="admin">Admin Authority (Full Master clearing bounds)</option>
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  disabled={isLoggingIn}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm py-2.5 rounded-xl transition-all shadow-lg text-center"
+                >
+                  {isLoggingIn ? 'Registering Account...' : 'Create Account & Log In'}
+                </button>
+              </motion.form>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* Footer branding */}
-        <div className="text-center font-mono text-[10px] text-slate-600 uppercase tracking-widest mt-6">
-          <span>IIT BHU Smart Room Scheduler • Academic Workspace Integration</span>
+        <div className="text-center font-mono text-[9px] text-slate-600 uppercase tracking-widest pt-4">
+          <span>IIT BHU Secure Full-Stack Portal • Academic Scheduling Node</span>
         </div>
       </div>
     );
   }
 
-  // Active Dashboard UI
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans flex flex-col justify-between">
       <div>
         {/* Core Header Navigation Bar */}
         <header className="bg-slate-900/80 border-b border-slate-800 backdrop-blur-md sticky top-0 z-40 px-6 py-4.5">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-            {/* Branding title */}
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+            
+            {/* Logo */}
             <div className="flex items-center gap-3">
-              <div className="bg-indigo-600 p-2.5 rounded-xl border border-indigo-400/20 shadow-md">
-                <Sparkles className="w-5 h-5 text-white" />
+              <div className="bg-gradient-to-tr from-indigo-500 to-violet-600 p-2.5 rounded-xl border border-indigo-400/20 shadow-md">
+                <Sparkles className="w-5 h-5 text-white animate-pulse" />
               </div>
               <div>
                 <h1 className="text-xl font-extrabold tracking-tight">IIT BHU Smart Room Scheduler</h1>
-                <p className="text-[10px] text-indigo-400 font-mono tracking-wider uppercase mt-0.5">
-                  IIT BHU Faculty Portal Connected
+                <p className="text-[9px] text-indigo-400 font-mono tracking-wider uppercase mt-0.5">
+                  Academic Full-Stack Database Nodes Active
                 </p>
               </div>
             </div>
 
             {/* Profile info & Signout */}
-            <div className="flex items-center gap-4">
-              <div className="font-mono text-xs text-slate-400 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 hidden sm:block">
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <div className="font-mono text-[11px] text-slate-400 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 hidden lg:block">
                 {currentTime || 'Syncing...'}
               </div>
 
+              {/* Notifications Alarm Bell button with badge dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowNotifications(!showNotifications);
+                    if (!showNotifications) {
+                      handleMarkNotificationsRead();
+                    }
+                  }}
+                  className={`relative p-2.5 rounded-xl border transition-all cursor-pointer ${
+                    notifications.some((n) => !n.read)
+                      ? 'bg-indigo-950/60 border-indigo-800 text-indigo-300 animate-pulse'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Academy Schedule System Notifications Inbox"
+                >
+                  <Bell className="w-4 h-4" />
+                  {notifications.some((n) => !n.read) && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-rose-500 rounded-full border border-slate-950" />
+                  )}
+                </button>
+
+                <AnimatePresence>
+                  {showNotifications && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 12 }}
+                      className="absolute right-0 mt-3 w-80 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl z-50 overflow-hidden text-left"
+                    >
+                      <div className="p-4 border-b border-slate-850 flex justify-between items-center bg-slate-1000/60">
+                        <span className="text-xs font-bold text-slate-200">System Notifications</span>
+                        <button
+                          onClick={() => {
+                            setNotifications([]);
+                            setShowNotifications(false);
+                          }}
+                          className="text-[10px] text-slate-500 hover:text-white uppercase font-mono cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      
+                      <div className="max-h-64 overflow-y-auto divide-y divide-slate-850/60">
+                        {notifications.length === 0 ? (
+                          <div className="p-6 text-center text-xs text-slate-500 italic">No notifications registered.</div>
+                        ) : (
+                          notifications.map((notif) => (
+                            <div key={notif.id} className="p-3.5 space-y-1 hover:bg-slate-950 transition-colors">
+                              <div className="flex justify-between items-start gap-2">
+                                <span className={`text-[10.5px] font-bold block leading-snug ${
+                                  notif.type === 'success' ? 'text-emerald-400' :
+                                  notif.type === 'warn' ? 'text-rose-450' : 'text-indigo-400'
+                                }`}>
+                                  {notif.title}
+                                </span>
+                                {!notif.read && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 mt-1" />
+                                )}
+                              </div>
+                              <p className="text-[10.5px] text-slate-450 leading-normal">{notif.message}</p>
+                              <span className="text-[8.5px] font-mono text-slate-600 block">
+                                {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Dynamic Google Link pill */}
               <button
-                onClick={async () => {
-                  const confirmReauth = window.confirm(
-                    "This will clear any cached Google Workspace access tokens and take you to the secure login popup to grant newly authorized permissions. Proceed?"
-                  );
-                  if (!confirmReauth) return;
-                  await logout();
-                  sessionStorage.removeItem('google_workspace_access_token');
-                  setUser(null);
-                  setToken(null);
-                  setNeedsAuth(true);
-                  setTimeout(() => {
-                    handleLogin();
-                  }, 100);
-                }}
-                className="bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold text-[10.5px] px-3 py-2 rounded-xl transition-all uppercase flex items-center gap-1 shrink-0 shadow-md shadow-amber-950/20"
-                title="Clears session cache and re-requests Google Workspace API permission scopes via a secure popup portal"
+                onClick={linkGoogleWorkspaceAccount}
+                className={`flex items-center gap-1.5 text-[10px] font-bold uppercase py-1.5 px-3 rounded-xl border transition-all ${
+                  googleWorkspaceLinked
+                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/40'
+                    : 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border-rose-800/40 animate-pulse'
+                }`}
+                title="Google Account Auth scope binder button"
               >
-                <Sparkles className="w-3.5 h-3.5 animate-pulse text-amber-950" />
-                <span>Fix Scopes / Re-Authorize</span>
+                <Link2 className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Google Sync: {googleWorkspaceLinked ? 'CONNECTED' : 'UNLINKED / LINK NOW'}</span>
               </button>
 
+              {/* Identity tag */}
               <div className="flex items-center gap-3 bg-slate-950 p-1.5 pr-3.5 rounded-full border border-slate-800">
-                {user.photoURL ? (
-                  <img src={user.photoURL} alt={user.displayName || 'User'} className="w-8 h-8 rounded-full border border-slate-800" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-indigo-900 border border-indigo-700 flex items-center justify-center font-bold text-xs uppercase">
-                    {(user.displayName || 'U').charAt(0)}
+                <div className="w-8 h-8 rounded-full bg-indigo-900/80 border border-indigo-700/60 flex items-center justify-center font-bold text-xs uppercase text-indigo-200">
+                  {user.name.charAt(0)}
+                </div>
+                <div className="text-left leading-tight">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-bold block text-slate-200">{user.name}</span>
+                    <span className={`text-[8px] font-extrabold uppercase py-0.5 px-1.5 rounded font-mono ${
+                      user.role === 'admin' ? 'bg-red-950 text-red-300 border border-red-800/35' : 
+                      user.role === 'faculty' ? 'bg-teal-950 text-teal-350 border border-teal-800/35' :
+                      'bg-amber-950 text-amber-350 border border-amber-800/35'
+                    }`}>
+                      {user.role}
+                    </span>
                   </div>
-                )}
-                <div className="text-left leading-tight hidden lg:block">
-                  <span className="text-xs font-bold block text-slate-200">{user.displayName || 'Verified User'}</span>
-                  <span className="text-[9px] text-slate-500 block max-w-[120px] truncate">{user.email}</span>
+                  <span className="text-[9px] text-slate-500 block max-w-[130px] truncate">{user.email}</span>
                 </div>
                 <button
                   onClick={handleSignout}
-                  className="p-1.5 text-slate-400 hover:text-rose-400 rounded-full hover:bg-slate-900 transition-colors cursor-pointer"
-                  title="Sign out session"
+                  className="p-1.5 text-slate-400 hover:text-rose-450 rounded-full hover:bg-slate-900 transition-colors cursor-pointer"
+                  title="Log out of IIT BHU credentials portal"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
             </div>
+
           </div>
         </header>
 
-        {/* Dashboard layout center */}
+        {/* Navigation Tabs Bar */}
         <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-          
-          {/* Navigation Tabs bar */}
           <div className="overflow-x-auto pb-1">
-            <div className="flex items-center gap-2 border-b border-slate-800/80">
+            <div className="flex items-center gap-2 border-b border-slate-800/80 mb-2">
               <button
                 onClick={() => setActiveTab('rooms')}
                 className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
@@ -531,52 +1027,93 @@ export default function App() {
                 Calendar Scheduler
               </button>
               <button
-                onClick={() => setActiveTab('drive')}
-                className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
-                  activeTab === 'drive'
-                    ? 'border-indigo-500 text-white bg-indigo-950/20'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
+                onClick={() => setActiveTab('ai')}
+                className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all cursor-pointer ${
+                  activeTab === 'ai'
+                    ? 'border-indigo-505 text-white bg-indigo-950/25'
+                    : 'border-transparent text-slate-400 hover:text-slate-205 hover:bg-slate-900/30'
                 }`}
               >
-                <HardDrive className="w-4 h-4" />
-                Drive Hub ({sessionReceipts.length})
+                <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
+                AI Advisor
               </button>
               <button
-                onClick={() => setActiveTab('gmail')}
+                onClick={() => setActiveTab('analytics')}
                 className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
-                  activeTab === 'gmail'
+                  activeTab === 'analytics'
                     ? 'border-indigo-500 text-white bg-indigo-950/20'
                     : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
                 }`}
               >
-                <Mail className="w-4 h-4" />
-                Gmail invites
+                <Activity className="w-4 h-4 text-rose-400" />
+                Analytics Dashboard
               </button>
-              <button
-                onClick={() => setActiveTab('chat')}
-                className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
-                  activeTab === 'chat'
-                    ? 'border-indigo-500 text-white bg-indigo-950/20'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
-                }`}
-              >
-                <MessageSquare className="w-4 h-4" />
-                Chat stream
-              </button>
-              <button
-                onClick={() => setActiveTab('forms')}
-                className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
-                  activeTab === 'forms'
-                    ? 'border-indigo-500 text-white bg-indigo-950/20'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
-                }`}
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                Forms Survey
-              </button>
+
+              {user.role === 'admin' && (
+                <button
+                  onClick={() => setActiveTab('admin')}
+                  className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
+                    activeTab === 'admin'
+                      ? 'border-rose-500 text-rose-200 bg-rose-950/20'
+                      : 'border-transparent text-slate-400 hover:text-rose-450 hover:bg-slate-900/30'
+                  }`}
+                >
+                  <Shield className="w-4 h-4 text-red-400 animate-pulse" />
+                  Admin Center
+                </button>
+              )}
+
+              <div className="border-l border-slate-800/80 pl-2 ml-2 flex items-center gap-2">
+                <button
+                  onClick={() => setActiveTab('drive')}
+                  className={`flex items-center gap-1.5 font-medium text-[11px] uppercase tracking-wider py-2 px-3 rounded-lg border border-slate-800 transition-all ${
+                    activeTab === 'drive'
+                      ? 'bg-indigo-950/40 text-indigo-200 border-indigo-900/30'
+                      : 'text-slate-500 hover:text-slate-350 bg-slate-950/25'
+                  }`}
+                >
+                  <HardDrive className="w-3.5 h-3.5" />
+                  Drive
+                </button>
+                <button
+                  onClick={() => setActiveTab('gmail')}
+                  className={`flex items-center gap-1.5 font-medium text-[11px] uppercase tracking-wider py-2 px-3 rounded-lg border border-slate-800 transition-all ${
+                    activeTab === 'gmail'
+                      ? 'bg-indigo-950/40 text-indigo-200 border-indigo-900/30'
+                      : 'text-slate-500 hover:text-slate-350 bg-slate-950/25'
+                  }`}
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  Gmail
+                </button>
+                <button
+                  onClick={() => setActiveTab('chat')}
+                  className={`flex items-center gap-1.5 font-medium text-[11px] uppercase tracking-wider py-2 px-3 rounded-lg border border-slate-800 transition-all ${
+                    activeTab === 'chat'
+                      ? 'bg-indigo-950/40 text-indigo-200 border-indigo-900/30'
+                      : 'text-slate-500 hover:text-slate-350 bg-slate-950/25'
+                  }`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Chat Space
+                </button>
+                <button
+                  onClick={() => setActiveTab('forms')}
+                  className={`flex items-center gap-1.5 font-medium text-[11px] uppercase tracking-wider py-2 px-3 rounded-lg border border-slate-800 transition-all ${
+                    activeTab === 'forms'
+                      ? 'bg-indigo-950/40 text-indigo-200 border-indigo-900/30'
+                      : 'text-slate-500 hover:text-slate-350 bg-slate-950/25'
+                  }`}
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  Forms
+                </button>
+              </div>
+
             </div>
           </div>
 
+          {/* Active Tab transition bounds */}
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -585,46 +1122,41 @@ export default function App() {
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.2 }}
             >
+              {/* ==========================================
+                  TAB: ROOMS DIRECTORY
+                  ========================================== */}
               {activeTab === 'rooms' && (
                 <div className="space-y-6">
-                  {/* Quick summary and sync status alert */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4.5 bg-slate-900 rounded-2xl border border-slate-800 gap-4">
                     <div>
-                      <h2 className="text-lg font-bold tracking-tight">Active Allocation Hub</h2>
+                      <h2 className="text-lg font-bold tracking-tight">Active Room Directory</h2>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        Choose suitable collaborative spaces, inspect configurations, and synchronize with Calendar schedules.
+                        Inspect custom built-in configurations and track space utilization states in real time.
                       </p>
                     </div>
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 self-stretch sm:self-auto justify-stretch">
                       <button
                         onClick={handleDownloadCSV}
-                        className="shrink-0 flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-wider bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 px-4 rounded-xl transition-all active:scale-95 shadow-md shadow-emerald-950/40 cursor-pointer"
-                        title="Download current filtered list of rooms as CSV"
+                        className="flex-1 sm:flex-none flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-wider bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 px-4 rounded-xl transition-all shadow-md shadow-emerald-950/40 cursor-pointer"
                       >
-                        <Download className="w-4 h-4 shrink-0 text-emerald-100" />
+                        <Download className="w-4 h-4 shrink-0" />
                         Download CSV ({filteredRooms.length})
                       </button>
                       <button
                         onClick={syncRoomsStatusFromCalendar}
-                        className="shrink-0 font-bold text-xs uppercase tracking-wider bg-slate-850 hover:bg-slate-800 border border-slate-700/60 text-slate-300 py-2.5 px-4 rounded-xl transition-all active:scale-95 cursor-pointer"
+                        className="flex-1 sm:flex-none font-bold text-xs uppercase tracking-wider bg-slate-850 hover:bg-slate-800 border border-slate-700/60 text-slate-300 py-2.5 px-4 rounded-xl transition-all cursor-pointer"
                       >
-                        🔄 Live Monitor Sync
+                        🔄 System Sync
                       </button>
                     </div>
                   </div>
 
-                  {/* Recharts Analytics Dashboard Chart */}
-                  <OccupancyChart sessionReceipts={sessionReceipts} />
-
-                  {/* Dynamic Filtering Controls Panel */}
+                  {/* Filter Controls */}
                   <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-                      <div className="flex items-center gap-2.5">
-                        <SlidersHorizontal className="w-4.5 h-4.5 text-indigo-400" />
-                        <div>
-                          <h3 className="text-sm font-bold tracking-tight text-white">Refine Office Spaces</h3>
-                          <p className="text-[11px] text-slate-400 mt-0.5">Filter the list of collaborative zones by target attendee capacity, built-in equipment, or keyword search</p>
-                        </div>
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                      <div className="flex items-center gap-2">
+                        <SlidersHorizontal className="w-4 h-4 text-indigo-400" />
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-200">Refining Filters</span>
                       </div>
                       {(minCapacity > 0 || selectedFeatureToggles.length > 0 || searchQuery.trim() !== '' || sortKey !== 'default') && (
                         <button
@@ -634,118 +1166,82 @@ export default function App() {
                             setSearchQuery('');
                             setSortKey('default');
                           }}
-                          className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-rose-400 hover:text-rose-300 bg-rose-950/20 hover:bg-rose-950/40 px-3 py-1.5 rounded-lg border border-rose-900/40 transition-all cursor-pointer"
+                          className="flex items-center gap-1.5 text-[9px] font-bold uppercase text-rose-450 hover:text-rose-450 bg-rose-950/20 px-2.5 py-1.5 rounded-lg border border-rose-900/30 cursor-pointer"
                         >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          Clear Custom Filters
+                          <RotateCcw className="w-3 h-3" />
+                          Clear all
                         </button>
                       )}
                     </div>
 
-                    {/* Search & Sort Panel */}
-                    <div className="flex flex-col lg:flex-row gap-3.5">
-                      {/* Search Input Bar */}
+                    <div className="flex flex-col lg:flex-row gap-4">
+                      {/* Search */}
                       <div className="flex-1 relative">
-                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                         <input
                           type="text"
-                          placeholder="Search spaces by name or specific feature keywords (e.g. whiteboard, projector, audio, screen)..."
+                          placeholder="Search rooms by name or equipment (e.g. Whiteboard, Projector)..."
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2.5 pl-10 pr-10 text-xs text-slate-200 placeholder:text-slate-600 outline-none transition-all focus:ring-1 focus:ring-indigo-500/20"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-200 placeholder:text-slate-600 outline-none transition-all"
                         />
-                        {searchQuery && (
-                          <button
-                            onClick={() => setSearchQuery('')}
-                            className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 font-bold px-2 py-0.5 rounded transition-all"
-                          >
-                            Clear
-                          </button>
-                        )}
                       </div>
-
-                      {/* Sort Dropdown */}
-                      <div className="lg:w-72 shrink-0 relative">
-                        <ArrowUpDown className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400 pointer-events-none" />
+                      {/* Sort dropdown */}
+                      <div className="lg:w-64 relative">
+                        <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400 pointer-events-none" />
                         <select
                           value={sortKey}
                           onChange={(e) => setSortKey(e.target.value as any)}
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2.5 pl-10 pr-10 text-xs text-slate-200 outline-none transition-all focus:ring-1 focus:ring-indigo-500/20 cursor-pointer appearance-none"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-200 outline-none appearance-none cursor-pointer"
                         >
-                          <option value="default">Sort: Default (Featured)</option>
-                          <option value="available-first">Sort: Availability (Available First)</option>
-                          <option value="booked-first">Sort: Availability (Booked First)</option>
-                          <option value="capacity-asc">Sort: Capacity (Low to High)</option>
-                          <option value="capacity-desc">Sort: Capacity (High to Low)</option>
+                          <option value="default">Sort: Default Featured</option>
+                          <option value="available-first font-mono">Available First</option>
+                          <option value="booked-first font-mono">Booked First</option>
+                          <option value="capacity-asc">Capacity (Low to High)</option>
+                          <option value="capacity-desc">Capacity (High to Low)</option>
                         </select>
-                        <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none pl-2 border-l border-slate-800/80">
-                          <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-1">
-                      {/* Capacity Toggle Group */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
                       <div className="space-y-2">
-                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">
-                          Minimum Required Capacity
-                        </span>
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Minimum Capacity Seats</span>
                         <div className="flex flex-wrap gap-1.5">
-                          {[
-                            { label: 'Any Seats', value: 0 },
-                            { label: '3+ Seats', value: 3 },
-                            { label: '8+ Seats', value: 8 },
-                            { label: '12+ Seats', value: 12 },
-                            { label: '16+ Seats', value: 16 }
-                          ].map((cap) => {
-                            const active = minCapacity === cap.value;
+                          {[0, 15, 30, 50, 100].map((cap) => {
+                            const active = minCapacity === cap;
                             return (
                               <button
-                                key={cap.value}
-                                onClick={() => setMinCapacity(cap.value)}
-                                className={`text-[11px] font-bold py-1.5 px-3 rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
-                                  active
-                                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm shadow-indigo-950/50'
-                                    : 'bg-slate-950 border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                                key={cap}
+                                onClick={() => setMinCapacity(cap)}
+                                className={`text-[10px] font-extrabold py-1 px-2.5 rounded-lg border transition-all ${
+                                  active ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'
                                 }`}
                               >
-                                {active && <Check className="w-3 h-3 shrink-0" />}
-                                {cap.label}
+                                {cap === 0 ? 'Any Seats' : `${cap}+ Seats`}
                               </button>
                             );
                           })}
                         </div>
                       </div>
 
-                      {/* Equipment/Features Toggle Group */}
                       <div className="space-y-2">
-                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">
-                          Search by Equipment / Amenity
-                        </span>
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Amenities & Features</span>
                         <div className="flex flex-wrap gap-1.5">
                           {['Projector', 'Whiteboard', 'Display/Screen', 'Audio/Video', 'Ergonomics/Seating'].map((feat) => {
-                            const active = selectedFeatureToggles.includes(feat);
+                            const isSelected = selectedFeatureToggles.includes(feat);
                             return (
                               <button
                                 key={feat}
                                 onClick={() => {
-                                  setSelectedFeatureToggles((prev) =>
-                                    prev.includes(feat) ? prev.filter((item) => item !== feat) : [...prev, feat]
+                                  setSelectedFeatureToggles(prev =>
+                                    isSelected ? prev.filter(t => t !== feat) : [...prev, feat]
                                   );
                                 }}
-                                className={`text-[11px] font-bold py-1.5 px-3 rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
-                                  active
-                                    ? 'bg-teal-600 border-teal-500 text-white shadow-sm shadow-teal-950/50'
-                                    : 'bg-slate-950 border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                                className={`text-[10.5px] font-semibold py-1 px-2.5 rounded-lg border transition-all flex items-center gap-1 ${
+                                  isSelected ? 'bg-indigo-950 text-indigo-300 border-indigo-800' : 'bg-slate-950 border-slate-850 text-slate-500 hover:text-slate-350'
                                 }`}
                               >
-                                {active ? (
-                                  <Check className="w-3 h-3 shrink-0" />
-                                ) : (
-                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-700 shrink-0" />
-                                )}
+                                {isSelected && <Check className="w-3 h-3 text-indigo-400" />}
                                 {feat}
                               </button>
                             );
@@ -756,462 +1252,634 @@ export default function App() {
                   </div>
 
                   {/* Rooms Cards Grid */}
-                  {filteredRooms.length === 0 ? (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="p-12 text-center bg-slate-900 border border-slate-800/80 rounded-2xl space-y-4"
-                    >
-                      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-slate-950 border border-slate-800 text-slate-500">
-                        <Filter className="w-5 h-5 text-indigo-400" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <h3 className="text-base font-bold text-slate-200">No matching spaces found</h3>
-                        <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
-                          We couldn't find any rooms matching your current capacity or equipment filter settings. Try relaxing your filters!
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setMinCapacity(0);
-                          setSelectedFeatureToggles([]);
-                          setSearchQuery('');
-                          setSortKey('default');
-                        }}
-                        className="font-bold text-xs uppercase tracking-wider bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 px-4.5 rounded-xl transition-all shadow-md active:scale-95 cursor-pointer"
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+                    {filteredRooms.map((room) => (
+                      <div
+                        key={room.id}
+                        className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300 flex flex-col justify-between"
                       >
-                        Reset Search Filters
-                      </button>
-                    </motion.div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {filteredRooms.map((room) => {
-                        const isOccupied = room.status === 'booked';
-                        return (
-                          <div
-                            key={room.id}
-                            className="bg-slate-900 border border-slate-800/85 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between"
-                          >
-                            <div className="relative h-48 bg-slate-800">
-                              <img
-                                src={room.image}
-                                alt={room.name}
-                                referrerPolicy="no-referrer"
-                                className="w-full h-full object-cover opacity-80"
-                              />
-                              {/* Visual room gradient wrapper */}
-                              <div className={`absolute inset-0 bg-gradient-to-t ${room.color} mix-blend-multiply opacity-55`} />
-                              
-                              {/* Card tags */}
-                              <div className="absolute top-4 left-4 flex gap-2">
-                                <span className="bg-black/70 backdrop-blur-md text-[10px] font-mono font-bold uppercase py-1 px-2.5 rounded-md border border-slate-700/55 flex items-center gap-1">
-                                  <Users className="w-3.5 h-3.5" />
-                                  Max: {room.capacity}
-                                </span>
-                              </div>
-
-                              {/* Scannable Check-In QR Accessor */}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedQRRoom(room);
-                                  setScanComplete(false);
-                                  setIsScanningSimulated(false);
-                                }}
-                                className="absolute top-4 right-4 bg-slate-950/85 hover:bg-slate-900 border border-slate-805 hover:border-indigo-500 rounded-xl p-2 md:p-2.5 text-indigo-400 hover:text-indigo-350 backdrop-blur-md transition-all active:scale-90 shadow-lg cursor-pointer flex items-center justify-center group z-10"
-                                title="Open Scannable QR Plaque"
-                              >
-                                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h6v6H3V3zM15 3h6v6h-6V3zM3 15h6v6H3v-6zM15 15h6v6h-6v-6z" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 18v3m3-3H9m12-3h-3m3 3h-3" />
-                                </svg>
-                                <span className="absolute right-full mr-2 scale-0 group-hover:scale-100 bg-slate-950/95 text-[10px] text-slate-350 font-bold px-2 py-1 rounded border border-slate-800 whitespace-nowrap transition-all hidden md:inline-block">
-                                  Scan QR Check-In
-                                </span>
-                              </button>
-
-                              <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
-                                <h3 className="text-xl font-bold tracking-tight drop-shadow-md flex items-center gap-2">
-                                  {/* Small color-coded dot indicator next to each room name */}
-                                  <span
-                                    className={`w-2.5 h-2.5 rounded-full shrink-0 shadow-sm ${
-                                      room.status === 'booked'
-                                        ? 'bg-rose-500 shadow-rose-950/40'
-                                        : room.status === 'expiring_soon'
-                                        ? 'bg-amber-500 shadow-amber-950/40'
-                                        : 'bg-emerald-500 shadow-emerald-950/40'
-                                    }`}
-                                    title={
-                                      room.status === 'booked'
-                                        ? 'Occupied'
-                                        : room.status === 'expiring_soon'
-                                        ? 'Expiring soon'
-                                        : 'Available'
-                                    }
-                                  />
-                                  {room.name}
-                                </h3>
-                                <span
-                                  className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-md border shadow-md font-mono ${
-                                    room.status === 'booked'
-                                      ? 'bg-rose-950/80 text-rose-300 border-rose-800/40'
-                                      : room.status === 'expiring_soon'
-                                      ? 'bg-amber-950/80 text-amber-300 border-amber-800/40'
-                                      : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/40'
-                                  }`}
-                                >
-                                  {room.status === 'booked'
-                                    ? '● Occupied'
-                                    : room.status === 'expiring_soon'
-                                    ? '● Expiring soon'
-                                    : '● Available'}
-                                </span>
-                              </div>
+                        <div>
+                          {/* Image area with status badge overlay */}
+                          <div className="relative h-48 overflow-hidden">
+                            <img src={room.image} alt={room.name} className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent" />
+                            
+                            {/* Role based constraint sign */}
+                            <div className="absolute top-4 left-4">
+                              <span className={`text-[10px] font-extrabold uppercase py-1 px-2 rounded-lg font-mono border flex items-center gap-1 ${
+                                room.status === 'available' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/40' :
+                                room.status === 'booked' ? 'bg-rose-950/80 text-rose-300 border-rose-800/40' :
+                                'bg-amber-950/80 text-amber-300 border-amber-800/40'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${room.status === 'available' ? 'bg-emerald-400' : room.status === 'booked' ? 'bg-rose-400' : 'bg-amber-400animate-ping'}`} />
+                                {room.status === 'available' ? 'AVAILABLE' : room.status === 'booked' ? 'OCCUPIED' : 'EXPIRING SOON'}
+                              </span>
                             </div>
 
-                            <div className="p-6 space-y-5 flex-1 flex flex-col justify-between">
-                              <div className="space-y-3">
-                                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block">
-                                  Equipment & Amenities (Click features to toggle filters)
-                                </span>
-                                <div className="flex flex-wrap gap-1.5 font-mono">
-                                  {room.features.map((feature, idx) => {
-                                    // Identify if this feature matches any active feature toggle
-                                    const norm = feature.toLowerCase();
-                                    let category = '';
-                                    if (norm.includes('projector')) category = 'Projector';
-                                    else if (norm.includes('whiteboard')) category = 'Whiteboard';
-                                    else if (norm.includes('display') || norm.includes('screen')) category = 'Display/Screen';
-                                    else if (norm.includes('audio') || norm.includes('conferencing')) category = 'Audio/Video';
-                                    else if (norm.includes('seating') || norm.includes('chair') || norm.includes('desk') || norm.includes('sofa')) category = 'Ergonomics/Seating';
-
-                                    const isActiveToggle = category ? selectedFeatureToggles.includes(category) : false;
-
-                                    return (
-                                      <button
-                                        key={idx}
-                                        onClick={() => {
-                                          if (category) {
-                                            setSelectedFeatureToggles((prev) =>
-                                              prev.includes(category)
-                                                ? prev.filter((item) => item !== category)
-                                                : [...prev, category]
-                                            );
-                                          }
-                                        }}
-                                        className={`text-[10px] border py-1 px-2.5 rounded-lg transition-all text-left font-sans cursor-pointer ${
-                                          isActiveToggle
-                                            ? 'bg-teal-950/60 border-teal-500/70 text-teal-300'
-                                            : 'bg-slate-950 border-slate-850 hover:border-indigo-500/50 hover:bg-slate-900 text-slate-300'
-                                        }`}
-                                        title={category ? `Filter by ${category}` : 'Feature info'}
-                                      >
-                                        {feature}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              <div className="pt-4 border-t border-slate-850 flex items-center justify-between gap-4">
-                                <span className="text-[10px] text-slate-400 block max-w-[160px] leading-relaxed">
-                                  Requires standard Google Auth permission scopes.
-                                </span>
-                                <button
-                                  onClick={() => {
-                                    if (isOccupied) {
-                                      setPreselectedRoomId(room.id);
-                                      setActiveTab('calendar');
-                                    } else {
-                                      setConfirmRoomSelection(room);
-                                    }
-                                  }}
-                                  className={`font-bold text-xs uppercase py-2 px-4.5 rounded-lg border transition-all active:scale-95 cursor-pointer ${
-                                    isOccupied
-                                      ? 'bg-slate-950 border-slate-850 text-slate-400 hover:text-white hover:bg-slate-800'
-                                      : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500 shadow-md hover:shadow-indigo-950'
-                                  }`}
-                                >
-                                  {isOccupied ? 'Inspect Schedule' : 'Book Office Space'}
-                                </button>
-                              </div>
+                            <div className="absolute bottom-4 left-4 right-4">
+                              <h3 className="text-lg font-black text-white drop-shadow-md">{room.name}</h3>
+                              <span className="text-xs text-slate-300 font-mono">Capacity: {room.capacity} seats</span>
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
 
-              {activeTab === 'calendar' && (
-                <CalendarWidget
-                  rooms={rooms}
-                  userEmail={user.email || ''}
-                  userName={user.displayName || 'Office User'}
-                  onRefreshRoomsStatus={syncRoomsStatusFromCalendar}
-                  onBookingAdded={handleNewBookingRegistered}
-                  defaultSelectedRoomId={preselectedRoomId}
-                />
-              )}
+                          {/* Room Features */}
+                          <div className="p-6 space-y-4">
+                            <div className="flex flex-wrap gap-1.5">
+                              {room.features.map((f, i) => (
+                                <span key={i} className="bg-slate-950 text-slate-400 border border-slate-850 py-1 px-2.5 rounded-lg text-[10.5px] font-medium">
+                                  {f}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
 
-              {activeTab === 'drive' && (
-                <DriveWidget receiptLogs={sessionReceipts} />
-              )}
-
-              {activeTab === 'gmail' && (
-                <GmailWidget 
-                  userEmail={user.email || ''} 
-                  gmailLog={gmailLog}
-                  setGmailLog={setGmailLog}
-                />
-              )}
-
-              {activeTab === 'chat' && (
-                <ChatWidget 
-                  chatLog={chatLog}
-                  setChatLog={setChatLog}
-                />
-              )}
-
-              {activeTab === 'forms' && (
-                <FormsWidget />
-              )}
-            </motion.div>
-          </AnimatePresence>
-        </main>
-      </div>
-
-      {/* Booking Intent Modal Confirmation Dialog */}
-      <AnimatePresence>
-        {confirmRoomSelection && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm cursor-pointer"
-              onClick={() => setConfirmRoomSelection(null)}
-            />
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 15 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              transition={{ type: 'spring', duration: 0.4 }}
-              className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-10"
-            >
-              <div className="h-2.5 w-full bg-gradient-to-r from-indigo-500 to-violet-600" />
-              
-              <div className="p-6 space-y-5">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 rounded-xl bg-indigo-950/60 border border-indigo-900/40 text-indigo-400">
-                    <Calendar className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-white tracking-tight">Confirm Booking Intent</h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Please confirm before navigating to scheduler</p>
-                  </div>
-                </div>
-
-                {/* Selected Space Overview Card */}
-                <div className="p-4 bg-slate-950/60 border border-slate-850 rounded-xl space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-400">Target Area:</span>
-                    <span className="text-xs font-bold text-indigo-300">{confirmRoomSelection.name}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-400">Maximum Capacity:</span>
-                    <span className="bg-slate-900 text-slate-350 font-mono text-[10.5px] px-2 py-0.5 rounded border border-slate-800 uppercase font-bold flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5 text-indigo-400" />
-                      {confirmRoomSelection.capacity} Seats
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-1 pt-1.5 border-t border-slate-900/40 font-mono">
-                    {confirmRoomSelection.features.map((feat, idx) => (
-                      <span key={idx} className="text-[9.5px] bg-slate-950 text-slate-400 border border-slate-850 px-2 py-0.5 rounded">
-                        {feat}
-                      </span>
+                        {/* Card bottom CTA */}
+                        <div className="p-6 pt-0 border-t border-slate-850/50 flex items-center justify-between gap-3 bg-slate-950/40 shrink-0">
+                          <button
+                            onClick={() => {
+                              setSelectedQRRoom(room);
+                              setScanComplete(false);
+                            }}
+                            className="bg-slate-850 hover:bg-slate-800 border border-slate-700/60 text-slate-300 py-2 px-4 rounded-xl text-xs font-bold uppercase tracking-wider transition-all"
+                          >
+                            QR SCANNER
+                          </button>
+                          
+                          {room.status === 'available' ? (
+                            <button
+                              onClick={() => {
+                                // Double caution check
+                                setConfirmRoomSelection(room);
+                                setPreselectedRoomId(room.id);
+                              }}
+                              className="bg-indigo-600 hover:bg-indigo-500 text-white py-2 px-4.5 rounded-xl text-xs font-bold uppercase tracking-wider shadow-lg shadow-indigo-950/30 transition-all cursor-pointer"
+                            >
+                              CHOOSE SLOT
+                            </button>
+                          ) : (
+                            <button
+                              disabled
+                              className="bg-slate-850/50 text-slate-600 py-2 px-4.5 rounded-xl text-xs font-semibold uppercase tracking-wider cursor-not-allowed"
+                            >
+                              OCCUPIED
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
+              )}
 
-                <div className="p-3 bg-indigo-950/20 border border-indigo-900/20 rounded-xl flex items-start gap-2.5">
-                  <HelpCircle className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    You will be redirected immediately to the <strong className="text-slate-350 font-semibold">Calendar Scheduler</strong> tab with this space pre-selected in the scheduling form to define your host settings and times.
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-1">
-                  <button
-                    onClick={() => setConfirmRoomSelection(null)}
-                    type="button"
-                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-white transition-colors duration-200 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => {
-                      setPreselectedRoomId(confirmRoomSelection.id);
-                      setActiveTab('calendar');
-                      setConfirmRoomSelection(null);
-                    }}
-                    type="button"
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-950/50 transition-all duration-200 cursor-pointer"
-                  >
-                    Proceed to Scheduler
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Interactive Scannable QR Plaque Scan Dialog */}
-      <AnimatePresence>
-        {selectedQRRoom && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-950/92 backdrop-blur-sm cursor-pointer"
-              onClick={() => setSelectedQRRoom(null)}
-            />
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 15 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              transition={{ type: 'spring', duration: 0.4 }}
-              className="relative w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 text-white font-sans text-center"
-            >
-              <div className="h-2 w-full bg-gradient-to-r from-emerald-500 via-indigo-500 to-violet-600" />
-              
-              <div className="p-6 space-y-6">
-                <div>
-                  <h3 className="text-lg font-extrabold tracking-tight">Scannable QR Plaque</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Physical check-in simulator for {selectedQRRoom.name}</p>
-                </div>
-
-                {/* Scannable Matrix Board */}
-                <div className="relative mx-auto w-44 h-44 bg-slate-950 p-4 rounded-2xl border border-slate-800 shadow-inner flex items-center justify-center group overflow-hidden">
-                  <div className="w-full h-full">
-                    <QRCodeSVG value={`https://scheduler.workspace/checkin/${selectedQRRoom.id}`} />
-                  </div>
-
-                  {/* Sweep scan indicator lines - laser effect */}
-                  {!scanComplete && (
-                    <motion.div
-                      animate={{
-                        top: ['5%', '95%', '5%'],
-                      }}
-                      transition={{
-                        duration: 3,
-                        repeat: Infinity,
-                        ease: 'easeInOut',
-                      }}
-                      className="absolute left-[5%] right-[5%] h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-lg shadow-cyan-400/80 z-10"
+              {/* ==========================================
+                  TAB: CALENDAR SCHEDULER
+                  ========================================== */}
+              {activeTab === 'calendar' && (
+                <div className="space-y-2">
+                  {!googleWorkspaceLinked ? (
+                    <WorkspaceGate
+                      activeTab="calendar"
+                      isIframe={isIframe}
+                      onLink={linkGoogleWorkspaceAccount}
+                    />
+                  ) : (
+                    <CalendarWidget
+                      rooms={rooms}
+                      userEmail={user.email}
+                      userName={user.name}
+                      onRefreshRoomsStatus={syncRoomsStatusFromCalendar}
+                      onBookingAdded={handleNewBookingRegistered}
+                      defaultSelectedRoomId={preselectedRoomId}
                     />
                   )}
-
-                  {scanComplete && (
-                    <div className="absolute inset-0 bg-slate-955/95 backdrop-blur-xs flex flex-col items-center justify-center space-y-2 text-emerald-400 animate-fade-in">
-                      <CheckCircle className="w-12 h-12 stroke-[2.5]" />
-                      <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-emerald-300">Checked In</span>
-                    </div>
-                  )}
                 </div>
+              )}
 
-                {/* Instructions */}
-                <div className="space-y-1">
-                  <div className="font-mono text-[9px] uppercase font-bold text-slate-500 tracking-wider">
-                    Integration Sync Channels
+              {/* ==========================================
+                  TAB: AI ADVISOR RECOMMENDATIONS
+                  ========================================== */}
+              {activeTab === 'ai' && (
+                <div className="space-y-2">
+                  <AIWidget
+                    onPreselectRoom={(roomId) => {
+                      setPreselectedRoomId(roomId);
+                      setActiveTab('calendar');
+                      addToast(`Room selection pre-selected! Configure schedule inside the calendar view.`, 'info');
+                    }}
+                    addToast={addToast}
+                    availableRooms={rooms}
+                  />
+                </div>
+              )}
+
+              {/* ==========================================
+                  TAB: ANALYTICS DASHBOARD
+                  ========================================== */}
+              {activeTab === 'analytics' && (
+                <div className="space-y-6">
+                  <div className="p-4.5 bg-slate-900 rounded-2xl border border-slate-800 text-left">
+                    <h2 className="text-lg font-bold tracking-tight">PostgreSQL Statistical Analysis</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Aggregated metric distributions derived cleanly from relational tables and query sequences.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed max-w-xs mx-auto">
-                    Scanning or click-triggering check-in fires sensory signals that flag this room as [OCCUPIED] and dispatches team notifications via Gmail and Chat instantly.
-                  </p>
-                </div>
 
-                {/* Action buttons */}
-                <div className="space-y-3 pt-1">
-                  {!scanComplete ? (
-                    <button
-                      onClick={() => {
-                        setIsScanningSimulated(true);
-                        setTimeout(() => {
-                          triggerFastCheckIn(selectedQRRoom);
-                          setScanComplete(true);
-                          setIsScanningSimulated(false);
-                        }, 1200);
-                      }}
-                      disabled={isScanningSimulated}
-                      className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs uppercase tracking-wider py-3 rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      {isScanningSimulated ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          Scanning Sensors...
-                        </>
-                      ) : (
-                        <>
-                          ⚡ Simulate Scannable Check-In
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="inline-flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-950/55 border border-emerald-900/45 px-4 py-1.5 rounded-full font-bold">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                        Live Synchronized
-                      </div>
-                      <p className="text-[10px] text-slate-500 leading-normal max-w-xs mx-auto">
-                        Check the <span className="text-indigo-400 font-bold cursor-pointer underline hover:text-indigo-300" onClick={() => { setSelectedQRRoom(null); setActiveTab('chat'); }}>Chat Stream</span> or <span className="text-indigo-400 font-bold cursor-pointer underline hover:text-indigo-300" onClick={() => { setSelectedQRRoom(null); setActiveTab('gmail'); }}>Gmail tab</span> to monitor the live workspace outbox log.
-                      </p>
+                  {/* Summary metric cubes */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl">
+                      <span className="text-[10px] text-slate-500 block uppercase font-mono tracking-widest">TOTAL BOOKINGS SECURED</span>
+                      <strong className="text-3xl font-black text-indigo-400 block mt-1">{analyticsStats?.totalBookings || adminBookings.length}</strong>
                     </div>
-                  )}
+                    <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl">
+                      <span className="text-[10px] text-slate-500 block uppercase font-mono tracking-widest">TOTAL ACADEMIC USERS</span>
+                      <strong className="text-3xl font-black text-teal-400 block mt-1">{analyticsStats?.totalUsers || adminUsers.length || 3}</strong>
+                    </div>
+                    <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl">
+                      <span className="text-[10px] text-slate-500 block uppercase font-mono tracking-widest">ALLOCATED HOURS</span>
+                      <strong className="text-3xl font-black text-amber-400 block mt-1">{analyticsStats?.totalAssignedHours || 0} Hours</strong>
+                    </div>
+                    <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl">
+                      <span className="text-[10px] text-slate-500 block uppercase font-mono tracking-widest">SEAT DENSITY INDEX</span>
+                      <strong className="text-3xl font-black text-violet-400 block mt-1">94.2%</strong>
+                    </div>
+                  </div>
 
-                  <button
-                    onClick={() => setSelectedQRRoom(null)}
-                    type="button"
-                    className="w-full text-xs font-bold uppercase tracking-wider py-1.5 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                  >
-                    Close Plaque
-                  </button>
+                  {analyticsStats ? (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      
+                      {/* Hourly booking demand */}
+                      <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                        <div className="mb-4">
+                          <h3 className="text-sm font-bold text-slate-350 flex items-center gap-1">
+                            <TrendingUp className="w-4 h-4 text-indigo-400" />
+                            Hourly Reservation Demand Wave (8 AM - 8 PM)
+                          </h3>
+                        </div>
+                        <div className="h-[250px] w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={analyticsStats.hourlyDemand}>
+                              <defs>
+                                <linearGradient id="colorHr" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.8}/>
+                                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
+                              <XAxis dataKey="hour" stroke="#64748b" fontSize={9} />
+                              <YAxis stroke="#64748b" fontSize={9} />
+                              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1f2937' }} />
+                              <Area name="Active overlap load" type="monotone" dataKey="bookings" stroke="#6366f1" fillOpacity={1} fill="url(#colorHr)" />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+
+                      {/* User composition Pie */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold text-slate-350">Credential Roles Decomposition</h3>
+                        </div>
+                        <div className="h-[180px] w-full mt-2">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={[
+                                  { name: 'Admins', value: analyticsStats.roleStats?.admin || 1 },
+                                  { name: 'Faculties', value: analyticsStats.roleStats?.faculty || 1 },
+                                  { name: 'Students', value: analyticsStats.roleStats?.student || 1 },
+                                ]}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={50}
+                                outerRadius={70}
+                                paddingAngle={5}
+                                dataKey="value"
+                              >
+                                {[0, 1, 2].map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1f2937' }} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="flex justify-center gap-4 text-[10px] font-mono mt-2 uppercase text-slate-400">
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#6366f1]" /> Admin</span>
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" /> Faculty</span>
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" /> Student</span>
+                        </div>
+                      </div>
+
+                    </div>
+                  ) : null}
+
+                  {/* Standard 7-Day Space Allocation Rates */}
+                  <OccupancyChart sessionReceipts={sessionReceipts} />
                 </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+              )}
 
-      {/* Dynamic Action Alerts Toasts */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-xs w-full pointer-events-none">
+              {/* ==========================================
+                  TAB: ADMIN OFFICE MASTER CONTROL CENTER
+                  ========================================== */}
+              {activeTab === 'admin' && user.role === 'admin' && (
+                <div className="space-y-8">
+                  <div className="p-4.5 bg-slate-900 rounded-2xl border border-red-950/40 text-left">
+                    <h2 className="text-lg font-bold tracking-tight text-rose-300">Administrative Oversight</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Verify registered academic accounts, modify structural permissions, manage rooms metadata, or force-delete booked slots.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Add Room form panel */}
+                    <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-slate-850">
+                        <Plus className="w-5 h-5 text-indigo-400" />
+                        De novo Room Creation Panel
+                      </h3>
+                      <form onSubmit={handleAdminAddRoom} className="space-y-4 text-left">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Space Display Name*</label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. Satish Dhawan Lecture Suite"
+                            value={adminRoomName}
+                            onChange={(e) => setAdminRoomName(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Seating capacity*</label>
+                            <input
+                              type="number"
+                              required
+                              value={adminRoomCapacity}
+                              onChange={(e) => setAdminRoomCapacity(Number(e.target.value))}
+                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Visual Gradient color</label>
+                            <select
+                              value={adminRoomColor}
+                              onChange={(e) => setAdminRoomColor(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none"
+                            >
+                              <option value="from-slate-705 to-slate-900">Charcoal Slate</option>
+                              <option value="from-violet-600 to-indigo-805">Violet Indigo</option>
+                              <option value="from-amber-600 to-orange-805">Amber Boardroom</option>
+                              <option value="from-teal-600 to-emerald-805">Teal Lecture</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Features / Equipment list (Comma split)</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Acoustic soundproofing, Laser Projector, Smart Cooler"
+                            value={adminRoomFeatures}
+                            onChange={(e) => setAdminRoomFeatures(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Photo URL placeholder</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Unsplash photo URL"
+                            value={adminRoomImage}
+                            onChange={(e) => setAdminRoomImage(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-3 rounded-xl text-xs uppercase"
+                        >
+                          De novo Create Room
+                        </button>
+                      </form>
+                    </div>
+
+                    {/* Manage user roles and credentials panel */}
+                    <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between">
+                      <div className="space-y-4">
+                        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-slate-850">
+                          <Users className="w-5 h-5 text-indigo-400" />
+                          Academic Credentials Directory ({adminUsers.length})
+                        </h3>
+                        <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                          {adminUsers.map((item) => (
+                            <div
+                              key={item.id}
+                              className="p-3 bg-slate-950 rounded-xl border border-slate-855 flex items-center justify-between text-xs"
+                            >
+                              <div className="text-left space-y-0.5">
+                                <strong className="text-slate-200 block">{item.name}</strong>
+                                <span className="text-[10px] text-slate-500 block font-mono">{item.email}</span>
+                              </div>
+                              <select
+                                value={item.role}
+                                onChange={(e) => handleAdminUpdateUserRole(item.id, e.target.value)}
+                                className={`bg-slate-900 border rounded py-1 px-1.5 text-[10px] font-bold uppercase ${
+                                  item.role === 'admin' ? 'border-red-900 text-red-400' :
+                                  item.role === 'faculty' ? 'border-teal-900 text-teal-400' :
+                                  'border-amber-900 text-amber-400'
+                                }`}
+                              >
+                                <option value="student">Student</option>
+                                <option value="faculty">Faculty</option>
+                                <option value="admin">Admin</option>
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Active Bookings Master Sweep */}
+                  <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl">
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5 pb-3 border-b border-slate-850 mb-4 text-left">
+                      <Trash2 className="w-5 h-5 text-rose-500" />
+                      Active Reservation Clearing master sweep ({adminBookings.length})
+                    </h3>
+                    {adminBookings.length === 0 ? (
+                      <p className="text-slate-500 italic text-xs py-4 text-center">No bookings exist in central schemas.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto">
+                        {adminBookings.map((b) => (
+                          <div
+                            key={b.id}
+                            className="p-4 bg-slate-950 border border-slate-850 rounded-xl flex items-start justify-between text-xs gap-3 text-left"
+                          >
+                            <div className="space-y-1">
+                              <span className="font-extrabold text-indigo-300 block">Location: {b.room_name}</span>
+                              <span className="font-semibold text-slate-200 block">Title: {b.summary}</span>
+                              <span className="text-[10px] text-slate-400 block font-mono">
+                                Date: {new Date(b.start_time).toLocaleDateString()} | {new Date(b.start_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - {new Date(b.end_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+                              </span>
+                              <span className="text-[9px] text-slate-550 block font-mono">Reserved by: {b.creator_name} ({b.creator_email})</span>
+                            </div>
+                            <button
+                              onClick={async () => {
+                                const ans = window.confirm(`Permanently dropped booking "${b.summary}"?`);
+                                if (!ans) return;
+                                await bookingsAPI.delete(b.id);
+                                addToast('Booking dismissed.', 'success');
+                                fetchDashboardModels(user.role);
+                              }}
+                              className="text-slate-400 hover:text-rose-400 p-2 hover:bg-slate-900 rounded-full transition-all shrink-0 cursor-pointer"
+                              title="Force Clear reservation slot"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Active Space Decommission list */}
+                  <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl">
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider pb-3 border-b border-slate-850 mb-4 text-left">
+                      Decommission Custom Spaces
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {rooms.map((item) => (
+                        <div
+                          key={item.id}
+                          className="p-3 bg-slate-950 border border-slate-855 rounded-xl flex items-center justify-between text-xs gap-3"
+                        >
+                          <div className="text-left">
+                            <strong className="text-slate-200 block">{item.name}</strong>
+                            <span className="text-[10px] text-slate-500 block">Capacity: {item.capacity} seats</span>
+                          </div>
+                          <button
+                            onClick={() => handleAdminDeleteRoom(item.id, item.name)}
+                            className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 py-1.5 px-3 border border-rose-900/40 rounded-lg shrink-0 font-bold font-mono text-[10px]"
+                          >
+                            Purge Room
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+              {/* ==========================================
+                  OTHER TABS: DECORATED INTEGRATED SYSTEM PANELS
+                  ========================================== */}
+              {activeTab === 'drive' && (
+                !googleWorkspaceLinked ? (
+                  <WorkspaceGate
+                    activeTab="drive"
+                    isIframe={isIframe}
+                    onLink={linkGoogleWorkspaceAccount}
+                  />
+                ) : (
+                  <DriveWidget receiptLogs={sessionReceipts} />
+                )
+              )}
+
+              {activeTab === 'gmail' && (
+                !googleWorkspaceLinked ? (
+                  <WorkspaceGate
+                    activeTab="gmail"
+                    isIframe={isIframe}
+                    onLink={linkGoogleWorkspaceAccount}
+                  />
+                ) : (
+                  <GmailWidget 
+                    userEmail={user.email} 
+                    gmailLog={gmailLog}
+                    setGmailLog={setGmailLog}
+                  />
+                )
+              )}
+
+              {activeTab === 'chat' && (
+                !googleWorkspaceLinked ? (
+                  <WorkspaceGate
+                    activeTab="chat"
+                    isIframe={isIframe}
+                    onLink={linkGoogleWorkspaceAccount}
+                  />
+                ) : (
+                  <ChatWidget 
+                    chatLog={chatLog}
+                    setChatLog={setChatLog}
+                  />
+                )
+              )}
+
+              {activeTab === 'forms' && (
+                !googleWorkspaceLinked ? (
+                  <WorkspaceGate
+                    activeTab="forms"
+                    isIframe={isIframe}
+                    onLink={linkGoogleWorkspaceAccount}
+                  />
+                ) : (
+                  <FormsWidget />
+                )
+              )}
+
+            </motion.div>
+          </AnimatePresence>
+
+        </main>
+      </div>
+
+      {/* Floating Action Notifications Toasts */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full">
         <AnimatePresence>
-          {toasts.map((toast) => (
+          {toasts.map((t) => (
             <motion.div
-              key={toast.id}
-              initial={{ opacity: 0, y: 30, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.85 }}
-              className="pointer-events-auto p-3.5 bg-slate-900 border-l-4 border-indigo-500 border border-slate-800 rounded-xl shadow-2xl flex items-start gap-3 text-xs text-white"
+              key={t.id}
+              initial={{ transform: 'translateY(50px) scale(0.9)', opacity: 0 }}
+              animate={{ transform: 'translateY(0) scale(1)', opacity: 1 }}
+              exit={{ transform: 'translateY(-20px) scale(0.9)', opacity: 0 }}
+              className={`p-4 rounded-xl border-2 shadow-2xl flex items-start gap-3 w-full ${
+                t.type === 'error'
+                  ? 'bg-rose-950/95 border-rose-800 text-rose-200 shadow-rose-950/50'
+                  : t.type === 'success'
+                  ? 'bg-indigo-950/95 border-indigo-805 text-indigo-150'
+                  : 'bg-slate-900/95 border-slate-800 text-slate-200'
+              }`}
             >
-              <div className="p-1 rounded-md bg-indigo-950 text-indigo-400 mt-0.5 shrink-0">
-                <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-              </div>
+              {t.type === 'error' ? (
+                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
+              ) : (
+                <CheckCircle className={`w-5 h-5 shrink-0 mt-0.5 ${t.type === 'success' ? 'text-indigo-400' : 'text-slate-400'}`} />
+              )}
               <div className="flex-1 space-y-0.5 text-left">
-                <div className="font-bold tracking-tight text-slate-100">Workspace Sensor Event</div>
-                <p className="text-slate-400 leading-normal text-[10.5px]">{toast.message}</p>
+                <p className="text-[10.5px] font-bold uppercase tracking-wider font-mono opacity-80">
+                  {t.type === 'error' ? 'SYSTEM ERROR' : t.type === 'success' ? 'SUCCESS' : 'INFO'}
+                </p>
+                <p className="text-xs font-semibold leading-relaxed text-left">{t.message}</p>
               </div>
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
 
-      <footer className="bg-slate-900 border-t border-slate-850 mt-12 py-6 px-6">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-slate-500 font-mono">
-          <span>Smart Room Scheduler • Powered by real Google Calendar, Gmail, Chat & Drive OAuth API integration.</span>
-          <span>© 2026 Sandbox Space. All Rights Reserved.</span>
+      {/* MODAL: QR Sensor Simulator Overlay */}
+      <AnimatePresence>
+        {selectedQRRoom && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-805 rounded-3xl p-6 max-w-sm w-full space-y-6 text-center"
+            >
+              <div className="space-y-1.5">
+                <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest font-mono">QR PLAQUE SENSOR DECODER</span>
+                <h3 className="text-lg font-black text-white">{selectedQRRoom.name}</h3>
+                <p className="text-slate-450 text-[11px]">Hold your mobile device up to the academic doorway QR matrix.</p>
+              </div>
+
+              <div className="flex justify-center p-4 bg-white rounded-2xl max-w-[200px] mx-auto border border-slate-250 shadow-inner">
+                {/* SVG matrix template */}
+                <QRCodeSVG value={`https://room-booking.iitbhu.ac.in/check-in/${selectedQRRoom.id}`} />
+              </div>
+
+              {!isScanningSimulated ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsScanningSimulated(true);
+                    setTimeout(() => {
+                      setIsScanningSimulated(false);
+                      setScanComplete(true);
+                      triggerFastCheckIn(selectedQRRoom);
+                      setTimeout(() => {
+                        setSelectedQRRoom(null);
+                      }, 2000);
+                    }, 1800);
+                  }}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl text-xs uppercase"
+                >
+                  SIMULATE MOBILE CAMERA SCAN
+                </button>
+              ) : (
+                <div className="space-y-2 py-2">
+                  <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <span className="text-xs text-slate-400 font-mono">Decoding sensory trace index...</span>
+                </div>
+              )}
+
+              {scanComplete && (
+                <div className="text-indigo-400 text-xs font-mono py-1 font-bold">
+                  ✓ check-in sensor processed. Dashboard updated!
+                </div>
+              )}
+
+              <div className="pt-2">
+                <button
+                  onClick={() => setSelectedQRRoom(null)}
+                  className="text-xs text-slate-500 hover:text-white"
+                >
+                  Cancel Scanner
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* CONFIRMATION SLOT SELECTION DIALOG */}
+      <AnimatePresence>
+        {confirmRoomSelection && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-805 rounded-3xl p-6 max-w-sm w-full space-y-6 text-center"
+            >
+              <div className="space-y-1">
+                <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest block font-mono">Confirm Space Selection</span>
+                <h3 className="text-lg font-black text-white">{confirmRoomSelection.name}</h3>
+                <p className="text-[11px] text-slate-450 leading-relaxed pt-1.5">
+                  You are selecting this classroom. You will be redirected to the **Calendar Scheduler** tab with this space pre-assigned.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setConfirmRoomSelection(null)}
+                  className="flex-1 bg-slate-850 hover:bg-slate-800 border border-slate-700/60 text-slate-300 py-2.5 rounded-xl text-xs font-bold uppercase transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setConfirmRoomSelection(null);
+                    setActiveTab('calendar');
+                    addToast(`Set pre-assigned classroom space: ${confirmRoomSelection.name}`);
+                  }}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-505 text-white py-2.5 rounded-xl text-xs font-bold uppercase transition shadow-lg shadow-indigo-950/20"
+                >
+                  Go to Scheduler
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Footer Branding */}
+      <footer className="py-6 border-t border-slate-900/80 mt-12 bg-slate-900/40">
+        <div className="max-w-7xl mx-auto px-6 text-center text-slate-500 text-[10px] font-mono uppercase tracking-wider space-y-1">
+          <span>Indian Institute of Technology (BHU) Varanasi</span><br />
+          <span>Smart Room reservation panel • connected to cloud postgres nodes</span>
         </div>
       </footer>
     </div>

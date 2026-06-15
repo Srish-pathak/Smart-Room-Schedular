@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { CalendarAPI, DriveAPI } from '../lib/workspace';
 import { Room } from '../types';
+import { bookingsAPI } from '../lib/api';
 import {
   Calendar,
   Clock,
@@ -39,6 +40,7 @@ export default function CalendarWidget({
   const [error, setError] = useState<string | null>(null);
   const [showBookModal, setShowBookModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [serverConflict, setServerConflict] = useState<any>(null);
 
   // Form states
   const [selectedRoomId, setSelectedRoomId] = useState(defaultSelectedRoomId || rooms[0]?.id || '');
@@ -158,11 +160,45 @@ export default function CalendarWidget({
     setLoading(true);
     setError(null);
     try {
-      const items = await CalendarAPI.listEvents();
-      setEvents(items);
+      // Fetch central database reservations
+      const dbBookings = await bookingsAPI.list();
+      
+      const mappedDbEvents = dbBookings.map((b: any) => ({
+        id: b.id,
+        summary: b.summary,
+        description: b.agenda,
+        location: b.room_name,
+        creator: { email: b.creator_email, displayName: b.creator_name },
+        start: { dateTime: b.start_time },
+        end: { dateTime: b.end_time },
+        attendees: b.attendee_email ? [{ email: b.attendee_email }] : []
+      }));
+
+      // Check if Google Workspace token is active in user session cache
+      let gEvents: any[] = [];
+      const hasGoogleToken = !!sessionStorage.getItem('google_workspace_access_token');
+      if (hasGoogleToken) {
+        try {
+          gEvents = await CalendarAPI.listEvents();
+        } catch (gErr) {
+          console.warn('Google Workspace credentials dormant/invalid:', gErr);
+        }
+      }
+
+      // Combine events safely
+      const combined = [...mappedDbEvents];
+      gEvents.forEach((ge: any) => {
+        // Prevent duplicate titles on same hour
+        const overlap = combined.some(c => c.summary === ge.summary && c.location === ge.location);
+        if (!overlap) {
+          combined.push(ge);
+        }
+      });
+
+      setEvents(combined);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to sync Google Calendar.');
+      setError(err.message || 'Could not fetch central space schedule.');
     } finally {
       setLoading(false);
     }
@@ -170,17 +206,13 @@ export default function CalendarWidget({
 
   useEffect(() => {
     fetchCalendarEvents();
-  }, []);
+  }, [rooms]);
 
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!summary.trim()) return;
 
-    if (conflicts.length > 0 && !bypassConflict) {
-      alert(`⚠️ Booking Conflict active! ${selectedRoomName} is already occupied during this time frame. Use our instant solver operations below to find free spaces, or confirm the double-book override.`);
-      return;
-    }
-
+    setServerConflict(null);
     setIsSubmitting(true);
     const roomName = selectedRoom ? selectedRoom.name : 'Unknown Room';
 
@@ -188,97 +220,111 @@ export default function CalendarWidget({
     const endDateTime = new Date(`${date}T${endTime}:00`).toISOString();
 
     try {
-      await CalendarAPI.createEvent({
+      // 1. Submit reservation to central PostgreSQL database via Express API
+      await bookingsAPI.create({
+        roomId: selectedRoomId,
         roomName,
         summary,
+        agenda,
         startTime: startDateTime,
         endTime: endDateTime,
-        creatorName: userName,
-        creatorEmail: userEmail,
-        facultyId: facultyId || undefined,
         attendeeEmail: attendeeEmail || undefined,
+        facultyId: facultyId || undefined
       });
 
-      // Automatically generate and upload receipt and agenda documents directly to Google Drive
-      try {
-        const timestamp = Date.now();
-        
-        // 1. Booking Receipt File
-        const receiptFilename = `${roomName.replace(/\s+/g, '_')}_Booking_Receipt_${timestamp}.html`;
-        const receiptHtml = `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Smart Room Booking Receipt</title>
-            <style>
-              body { font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; }
-              .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; max-width: 500px; margin: 0 auto; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-              h2 { color: #818cf8; border-bottom: 2px solid #334155; padding-bottom: 12px; margin-top: 0; }
-              .item { font-size: 14px; margin: 12px 0; }
-              .label { color: #94a3b8; font-weight: bold; }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <h2>Smart Room Booking Receipt</h2>
-              <div class="item"><span class="label">Room Space:</span> ${roomName}</div>
-              <div class="item"><span class="label">Meeting Title:</span> ${summary}</div>
-              <div class="item"><span class="label">Reservation Start:</span> ${new Date(startDateTime).toLocaleString()}</div>
-              <div class="item"><span class="label">Reservation End:</span> ${new Date(endDateTime).toLocaleString()}</div>
-              <div class="item"><span class="label">Faculty Member:</span> ${facultyId || userName}</div>
-              <div class="item"><span class="label">Attendee Email:</span> ${attendeeEmail || 'None'}</div>
-              <div style="font-size: 10px; color: #64748b; margin-top: 30px; text-align: center;">Verified by IIT BHU Smart Room Scheduler Dashboard</div>
-            </div>
-          </body>
-          </html>
-        `;
-        await DriveAPI.createLogFile(receiptFilename, receiptHtml);
+      // 2. Synchronously trigger optional Google Workspace sync (Calendar, Drive Logs/Receipts)
+      const hasGoogleToken = !!sessionStorage.getItem('google_workspace_access_token');
+      if (hasGoogleToken) {
+        try {
+          await CalendarAPI.createEvent({
+            roomName,
+            summary,
+            startTime: startDateTime,
+            endTime: endDateTime,
+            creatorName: userName,
+            creatorEmail: userEmail,
+            facultyId: facultyId || undefined,
+            attendeeEmail: attendeeEmail || undefined,
+          });
 
-        // 2. Dedicated Meeting Agenda File
-        const agendaFilename = `${summary.replace(/\s+/g, '_')}_Meeting_Agenda_${timestamp}.html`;
-        const agendaHtml = `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Meeting Agenda: ${summary}</title>
-            <style>
-              body { font-family: sans-serif; background: #0b0f19; color: #e2e8f0; padding: 40px; line-height: 1.6; }
-              .container { background: #111827; border: 1px solid #1f2937; border-radius: 16px; padding: 32px; max-width: 650px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); }
-              h1 { color: #6366f1; border-bottom: 2px solid #1f2937; padding-bottom: 12px; font-size: 24px; margin-top: 0; }
-              h2 { color: #10b981; font-size: 18px; margin-top: 24px; }
-              .meta-box { background: #1f2937; padding: 16px; border-radius: 8px; margin-bottom: 24px; border-left: 4px solid #6366f1; }
-              .meta-item { font-size: 13px; margin: 6px 0; color: #9ca3af; }
-              .meta-label { color: #f3f4f6; font-weight: bold; }
-              .agenda-text { background: #030712; padding: 20px; border-radius: 8px; border: 1px solid #374151; font-family: inherit; font-size: 14px; white-space: pre-wrap; color: #f3f4f6; }
-              footer { font-size: 11px; color: #4b5563; margin-top: 40px; text-align: center; border-top: 1px solid #1f2937; padding-top: 16px; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <h1>📝 Meeting Agenda & Details</h1>
-              <div class="meta-box">
-                <div class="meta-item"><span class="meta-label">Allocation Space:</span> ${roomName}</div>
-                <div class="meta-item"><span class="meta-label">Meeting Title:</span> ${summary}</div>
-                <div class="meta-item"><span class="meta-label">Date & Time:</span> ${new Date(startDateTime).toLocaleString()} - ${new Date(endDateTime).toLocaleTimeString()}</div>
-                <div class="meta-item"><span class="meta-label">Organized By:</span> ${userName} (${userEmail})</div>
-                <div class="meta-item"><span class="meta-label">Faculty Member:</span> ${facultyId || 'Not specified'}</div>
-                <div class="meta-item"><span class="meta-label">Attendee Email:</span> ${attendeeEmail || 'None'}</div>
+          // Upload metadata files to Drive
+          const timestamp = Date.now();
+          const receiptFilename = `${roomName.replace(/\s+/g, '_')}_Booking_Receipt_${timestamp}.html`;
+          const receiptHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <title>Smart Room Booking Receipt</title>
+              <style>
+                body { font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; }
+                .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; max-width: 500px; margin: 0 auto; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+                h2 { color: #818cf8; border-bottom: 2px solid #334155; padding-bottom: 12px; margin-top: 0; }
+                .item { font-size: 14px; margin: 12px 0; }
+                .label { color: #94a3b8; font-weight: bold; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <h2>Smart Room Booking Receipt</h2>
+                <div class="item"><span class="label">Room Space:</span> ${roomName}</div>
+                <div class="item"><span class="label">Meeting Title:</span> ${summary}</div>
+                <div class="item"><span class="label">Reservation Start:</span> ${new Date(startDateTime).toLocaleString()}</div>
+                <div class="item"><span class="label">Reservation End:</span> ${new Date(endDateTime).toLocaleString()}</div>
+                <div class="item"><span class="label">Faculty Member:</span> ${facultyId || userName}</div>
+                <div class="item"><span class="label">Attendee Email:</span> ${attendeeEmail || 'None'}</div>
+                <div style="font-size: 10px; color: #64748b; margin-top: 30px; text-align: center;">Verified by IIT BHU Smart Room Scheduler Dashboard</div>
               </div>
-              <h2>📋 Agenda Details & Discussion Topics</h2>
-              <div class="agenda-text">${agenda || 'No agenda details were provided.'}</div>
-              <footer>
-                Document saved automatically with Google Workspace Drive integration.<br>
-                IIT BHU Smart Room Scheduler Dashboard
-              </footer>
-            </div>
-          </body>
-          </html>
-        `;
-        await DriveAPI.createLogFile(agendaFilename, agendaHtml);
-      } catch (driveErr: any) {
-        console.error('Google Drive sync failed:', driveErr);
+            </body>
+            </html>
+          `;
+          await DriveAPI.createLogFile(receiptFilename, receiptHtml);
+
+          // Dedicated meeting agenda file
+          const agendaFilename = `${summary.replace(/\s+/g, '_')}_Meeting_Agenda_${timestamp}.html`;
+          const agendaHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <title>Meeting Agenda: ${summary}</title>
+              <style>
+                body { font-family: sans-serif; background: #0b0f19; color: #e2e8f0; padding: 40px; line-height: 1.6; }
+                .container { background: #111827; border: 1px solid #1f2937; border-radius: 16px; padding: 32px; max-width: 650px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); }
+                h1 { color: #6366f1; border-bottom: 2px solid #1f2937; padding-bottom: 12px; font-size: 24px; margin-top: 0; }
+                h2 { color: #10b981; font-size: 18px; margin-top: 24px; }
+                .meta-box { background: #1f2937; padding: 16px; border-radius: 8px; margin-bottom: 24px; border-left: 4px solid #6366f1; }
+                .meta-item { font-size: 13px; margin: 6px 0; color: #9ca3af; }
+                .meta-label { color: #f3f4f6; font-weight: bold; }
+                .agenda-text { background: #030712; padding: 20px; border-radius: 8px; border: 1px solid #374151; font-family: inherit; font-size: 14px; white-space: pre-wrap; color: #f3f4f6; }
+                footer { font-size: 11px; color: #4b5563; margin-top: 40px; text-align: center; border-top: 1px solid #1f2937; padding-top: 16px; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h1>📝 Meeting Agenda & Details</h1>
+                <div class="meta-box">
+                  <div class="meta-item"><span class="meta-label">Allocation Space:</span> ${roomName}</div>
+                  <div class="meta-item"><span class="meta-label">Meeting Title:</span> ${summary}</div>
+                  <div class="meta-item"><span class="meta-label">Date & Time:</span> ${new Date(startDateTime).toLocaleString()} - ${new Date(endDateTime).toLocaleTimeString()}</div>
+                  <div class="meta-item"><span class="meta-label">Organized By:</span> ${userName} (${userEmail})</div>
+                  <div class="meta-item"><span class="meta-label">Faculty Member:</span> ${facultyId || 'Not specified'}</div>
+                  <div class="meta-item"><span class="meta-label">Attendee Email:</span> ${attendeeEmail || 'None'}</div>
+                </div>
+                <h2>📋 Agenda Details & Discussion Topics</h2>
+                <div class="agenda-text">${agenda || 'No agenda details were provided.'}</div>
+                <footer>
+                  Document saved automatically with Google Workspace Drive integration.<br>
+                  IIT BHU Smart Room Scheduler Dashboard
+                </footer>
+              </div>
+            </body>
+            </html>
+          `;
+          await DriveAPI.createLogFile(agendaFilename, agendaHtml);
+        } catch (gErr) {
+          console.warn('Google Workspace write failure, stored safely in Postgres:', gErr);
+        }
       }
 
       setShowBookModal(false);
@@ -286,30 +332,42 @@ export default function CalendarWidget({
       setAgenda('');
       setFacultyId('');
       setAttendeeEmail('');
-      onBookingAdded(roomName, summary, startDateTime, endDateTime, agenda);
+      onBookingAdded(roomName, summary, startDateTime, endDateTime, agenda || '');
       await fetchCalendarEvents();
-      onRefreshRoomsStatus();
     } catch (err: any) {
-      alert(err.message || 'Booking failed');
+      if (err.status === 409 && err.conflict) {
+        setServerConflict(err.conflict);
+      } else {
+        alert(`Reservation Error: ${err.message || 'Conflict occurred. Check your timeline settings.'}`);
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleDeleteEvent = async (eventId: string, summary: string) => {
-    // MANDATORY USER CONFIRMATION
-    const confirmed = window.confirm(
-      `Are you sure you want to cancel and delete the Google Calendar booking "${summary}"?\nThis will remove it from your primary Google Calendar.`
-    );
-    if (!confirmed) return;
+    const isApproved = window.confirm(`Are you sure you want to cancel the meeting: "${summary}"?`);
+    if (!isApproved) return;
 
     try {
       setLoading(true);
-      await CalendarAPI.deleteEvent(eventId);
+      // 1. Delete from PostgreSQL database via API proxy
+      await bookingsAPI.delete(eventId);
+
+      // 2. Try cleanup from Google Calendar if token exists
+      const hasGoogleToken = !!sessionStorage.getItem('google_workspace_access_token');
+      if (hasGoogleToken) {
+        try {
+          await CalendarAPI.deleteEvent(eventId);
+        } catch (gErr) {
+          console.warn('Google Calendar delete skipped:', gErr);
+        }
+      }
+
       await fetchCalendarEvents();
       onRefreshRoomsStatus();
     } catch (err: any) {
-      alert(err.message || 'Cancel failed');
+      alert(`Deletion Error: ${err.message || 'Action restricted.'}`);
     } finally {
       setLoading(false);
     }
@@ -586,7 +644,7 @@ export default function CalendarWidget({
               </div>
 
               {/* Conflict Status Warning & Smart Resolvers Section */}
-              {conflicts.length > 0 && (
+              {(conflicts.length > 0 || serverConflict) && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
@@ -594,44 +652,55 @@ export default function CalendarWidget({
                 >
                   <div className="flex items-start gap-2.5 text-xs">
                     <AlertTriangle className="w-4 h-4 text-rose-450 shrink-0 mt-0.5" />
-                    <div className="space-y-1">
+                    <div className="space-y-1 text-left">
                       <span className="font-bold text-rose-300 block">⚠️ Time-Slot Conflict Detected</span>
                       <span className="text-[11px] text-slate-350 block">
-                        {selectedRoomName} is already locked because it overlaps with these scheduled meetings:
+                        {selectedRoomName} has active overlapping booking constraints:
                       </span>
-                      <ul className="list-disc list-inside text-[10.5px] text-slate-400 space-y-0.5 pl-1">
-                        {conflicts.map((c, i) => {
-                          const cStart = c.start?.dateTime ? new Date(c.start.dateTime) : null;
-                          const cEnd = c.end?.dateTime ? new Date(c.end.dateTime) : null;
-                          const timeStr = cStart && cEnd
-                            ? `${cStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${cEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                            : 'All Day';
-                          return (
-                            <li key={i}>
-                              <span className="text-slate-300 font-semibold">"{c.summary}"</span> ({timeStr})
-                            </li>
-                          );
-                        })}
-                      </ul>
+                      {serverConflict?.overlappingBooking ? (
+                        <div className="text-[10.5px] text-slate-400 bg-slate-950/40 p-2 rounded border border-rose-900/20 font-mono mt-1">
+                          <strong className="text-slate-300 font-sans block">"{serverConflict.overlappingBooking.summary}"</strong>
+                          <span>Booked by: {serverConflict.overlappingBooking.creatorName}</span><br />
+                          <span>Duration: {new Date(serverConflict.overlappingBooking.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - {new Date(serverConflict.overlappingBooking.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                        </div>
+                      ) : (
+                        <ul className="list-disc list-inside text-[10.5px] text-slate-400 space-y-0.5 pl-1">
+                          {conflicts.map((c, i) => {
+                            const cStart = c.start?.dateTime ? new Date(c.start.dateTime) : null;
+                            const cEnd = c.end?.dateTime ? new Date(c.end.dateTime) : null;
+                            const timeStr = cStart && cEnd
+                              ? `${cStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${cEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                              : 'All Day';
+                            return (
+                              <li key={i}>
+                                <span className="text-slate-300 font-semibold">"{c.summary}"</span> ({timeStr})
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
                     </div>
                   </div>
 
                   {/* Smart Solutions suggestions */}
-                  <div className="space-y-2.5 pt-2 border-t border-rose-900/30 text-xs">
+                  <div className="space-y-2.5 pt-2 border-t border-rose-900/30 text-xs text-left">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block font-mono">
                       💡 SMART CONFLICT SOLVERS:
                     </span>
 
                     {/* Move to free alternative room */}
-                    {alternativeRooms.length > 0 ? (
+                    {((serverConflict?.sisterRooms && serverConflict.sisterRooms.length > 0) || alternativeRooms.length > 0) ? (
                       <div className="space-y-1.5">
                         <p className="text-[10px] text-slate-400">Available free rooms during this exact block:</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {alternativeRooms.slice(0, 3).map((altRoom) => (
+                          {(serverConflict?.sisterRooms ? serverConflict.sisterRooms : alternativeRooms).slice(0, 3).map((altRoom: any) => (
                             <button
                               key={altRoom.id}
                               type="button"
-                              onClick={() => setSelectedRoomId(altRoom.id)}
+                              onClick={() => {
+                                setSelectedRoomId(altRoom.id);
+                                setServerConflict(null);
+                              }}
                               className="text-[10px] bg-teal-950/40 hover:bg-teal-900/60 border border-teal-800/40 text-teal-350 py-1.5 px-2.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer font-medium"
                             >
                               <Shuffle className="w-3 h-3 text-teal-400 shrink-0" />
@@ -645,20 +714,32 @@ export default function CalendarWidget({
                     )}
 
                     {/* Reschedule to next open time */}
-                    {suggestedTimeCorrection && (
+                    {(serverConflict?.advisorVacancyTime || suggestedTimeCorrection) && (
                       <div className="space-y-1">
                         <p className="text-[10px] text-slate-400">Postpone to next vacant time:</p>
                         <button
                           type="button"
                           onClick={() => {
-                            setStartTime(suggestedTimeCorrection.start);
-                            setEndTime(suggestedTimeCorrection.end);
+                            if (serverConflict?.advisorVacancyTime) {
+                              const vacantDate = new Date(serverConflict.advisorVacancyTime);
+                              // Set end time 1 hour after vacant date
+                              const vacantEnd = new Date(vacantDate.getTime() + 60*60*1000);
+                              
+                              const pad = (n: number) => String(n).padStart(2, '0');
+                              setStartTime(`${pad(vacantDate.getHours())}:${pad(vacantDate.getMinutes())}`);
+                              setEndTime(`${pad(vacantEnd.getHours())}:${pad(vacantEnd.getMinutes())}`);
+                              setDate(vacantDate.toISOString().split('T')[0]);
+                            } else if (suggestedTimeCorrection) {
+                              setStartTime(suggestedTimeCorrection.start);
+                              setEndTime(suggestedTimeCorrection.end);
+                            }
+                            setServerConflict(null);
                           }}
                           className="w-full text-left text-[11px] bg-indigo-950/30 text-indigo-300 hover:bg-indigo-900/50 border border-indigo-800/30 py-2 px-3 rounded-lg transition-all flex items-center justify-between cursor-pointer"
                         >
                           <span className="flex items-center gap-1.5 font-bold">
                             <Clock className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                            Reschedule to {suggestedTimeCorrection.readable}
+                            Reschedule to Next Available Slot
                           </span>
                           <span className="text-[9px] font-mono text-indigo-400 flex items-center gap-1 font-bold uppercase shrink-0">
                             Apply <ArrowRight className="w-3 h-3" />
@@ -666,18 +747,19 @@ export default function CalendarWidget({
                         </button>
                       </div>
                     )}
-                  </div>
 
-                  {/* Manual Override authorization */}
-                  <label className="flex items-center gap-2 pt-2 border-t border-rose-900/30 text-[11px] text-rose-300 font-bold cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={bypassConflict}
-                      onChange={(e) => setBypassConflict(e.target.checked)}
-                      className="rounded bg-slate-950 border-rose-900 text-rose-600 focus:ring-rose-500 w-3.5 h-3.5 cursor-pointer"
-                    />
-                    <span>Yes, authorize double-booking room anyway</span>
-                  </label>
+                    {/* Manual Override authorization */}
+                    <label className="flex items-center gap-2 pt-2.5 border-t border-rose-900/30 text-[11px] text-rose-300 font-bold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={bypassConflict}
+                        onChange={(e) => setBypassConflict(e.target.checked)}
+                        className="rounded bg-slate-950 border-rose-900 text-rose-600 focus:ring-rose-500 w-3.5 h-3.5 cursor-pointer"
+                      />
+                      <span>Overrule and reserve space with bypass authorization</span>
+                    </label>
+
+                  </div>
                 </motion.div>
               )}
 
