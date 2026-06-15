@@ -1,0 +1,6 @@
+{
+  "name": "IIT BHU Smart Room Scheduler",
+  "description": "A professional smart room booking and scheduling system for IIT BHU faculty members with full Google Calendar, Gmail, Drive, Chat, and Forms integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
