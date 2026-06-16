@@ -25,6 +25,11 @@ async function googleFetch(url: string, options: RequestInit = {}) {
     } catch {
       parsedErr = errText;
     }
+    const isAuthError = response.status === 401 || response.status === 403 || errText.toLowerCase().includes('invalid credential') || errText.toLowerCase().includes('authentication') || errText.toLowerCase().includes('invalid_grant');
+    if (isAuthError) {
+      sessionStorage.removeItem('google_workspace_access_token');
+      window.dispatchEvent(new CustomEvent('google-token-invalid', { detail: { status: response.status, message: errText } }));
+    }
     throw new Error(
       parsedErr?.error?.message || `Google API Error (${response.status}): ${errText}`
     );
@@ -143,6 +148,10 @@ export const DriveAPI = {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        sessionStorage.removeItem('google_workspace_access_token');
+        window.dispatchEvent(new CustomEvent('google-token-invalid'));
+      }
       throw new Error(`Failed to upload content for file ${fileId}`);
     }
 

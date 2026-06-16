@@ -75,7 +75,12 @@ import {
   TrendingUp,
   Sliders,
   Bell,
-  CheckSquare
+  CheckSquare,
+  Sun,
+  Moon,
+  ExternalLink,
+  X,
+  History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -135,6 +140,25 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
 
+  // High-performance theme state supporting system preferences & persistence
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('iitbhu-theme');
+    if (saved) {
+      return saved !== 'light';
+    }
+    // Default to dark mode (matches original custom teal branding)
+    return true;
+  });
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.remove('light');
+    } else {
+      document.documentElement.classList.add('light');
+    }
+    localStorage.setItem('iitbhu-theme', isDarkMode ? 'dark' : 'light');
+  }, [isDarkMode]);
+
   // Form states for login/signup
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -179,6 +203,8 @@ export default function App() {
 
   // Selected Room for Scannable QR Modal
   const [selectedQRRoom, setSelectedQRRoom] = useState<Room | null>(null);
+  const [selectedRoomForHistory, setSelectedRoomForHistory] = useState<Room | null>(null);
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [isScanningSimulated, setIsScanningSimulated] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
 
@@ -255,8 +281,17 @@ export default function App() {
     const unsubscribe = subscribeToSupabaseErrors((message) => {
       addToast(message, 'error');
     });
+
+    const handleGoogleTokenInvalid = () => {
+      setGoogleWorkspaceLinked(false);
+      addToast('Your Google Workspace session has expired or is invalid. Please link your account again.', 'error');
+    };
+
+    window.addEventListener('google-token-invalid', handleGoogleTokenInvalid);
+
     return () => {
       unsubscribe();
+      window.removeEventListener('google-token-invalid', handleGoogleTokenInvalid);
     };
   }, []);
 
@@ -675,9 +710,22 @@ export default function App() {
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-teal-600/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="self-end text-right font-mono text-xs text-slate-500 flex items-center gap-1.5 pt-2">
-          <Clock3 className="w-3.5 h-3.5 text-indigo-400" />
-          <span>BHU Office Clock: {currentTime || 'Loading...'}</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full max-w-xl mx-auto pt-2 z-10 relative">
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white hover:border-slate-700 transition-all font-semibold text-xs cursor-pointer select-none"
+            title="Toggle Light / Dark mode themes"
+          >
+            {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-400" />}
+            <span className="font-mono text-[9.5px] tracking-wider uppercase">
+              {isDarkMode ? 'Light Mode' : 'Dark Mode'}
+            </span>
+          </button>
+
+          <div className="self-end sm:self-auto text-right font-mono text-xs text-slate-500 flex items-center gap-1.5">
+            <Clock3 className="w-3.5 h-3.5 text-indigo-400" />
+            <span>BHU Office Clock: {currentTime || 'Loading...'}</span>
+          </div>
         </div>
 
         <div className="max-w-xl w-full mx-auto my-auto bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10 space-y-6">
@@ -865,8 +913,38 @@ export default function App() {
             
             {/* Logo */}
             <div className="flex items-center gap-3">
-              <div className="bg-gradient-to-tr from-indigo-500 to-violet-600 p-2.5 rounded-xl border border-indigo-400/20 shadow-md">
-                <Sparkles className="w-5 h-5 text-white animate-pulse" />
+              <div className="bg-gradient-to-tr from-indigo-500 to-violet-600 p-2 rounded-xl border border-indigo-400/20 shadow-lg">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 64 64"
+                  fill="none"
+                  className="w-6.5 h-6.5 text-white animate-pulse"
+                >
+                  {/* Outer Sacred Lotus Ring & Shield Border */}
+                  <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="2" opacity="0.35" />
+                  <circle cx="32" cy="32" r="24" stroke="currentColor" strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
+                  
+                  {/* Traditional Flourishing Lotus Base Accent */}
+                  <path d="M19 44c3.5-1.5 8.5-2.5 13-2.5s9.5 1 13 2.5c-2 3.5-5.5 5.5-13 5.5s-11-2-13-5.5z" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1.5" />
+                  
+                  {/* Open Sacred Book of Knowledge representing BHU's academic legacy */}
+                  <path d="M32 40c-2.5-2-5.5-3-9-3s-6.5.8-9 2.5V26c2.5-1.7 5.5-2.5 9-2.5s6.5.8 9 2.5c2.5-1.7 5.5-2.5 9-2.5s6.5.8 9 2.5v14c-2.5-1.7-5.5-2.5-9-2.5s-6.5 1-9 3z" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  
+                  {/* Central Halo of spiritual & technical wisdom */}
+                  <circle cx="32" cy="20" r="9" stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" opacity="0.4" />
+                  
+                  {/* Flaming Torch center stem */}
+                  <path d="M32 29v7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                  {/* Flame representing the light of learning */}
+                  <path d="M32 12c-2.5 3.5-4 5-4 7a4 4 0 1 0 8 0c0-2-1.5-3.5-4-7z" fill="currentColor" opacity="0.95" />
+                  
+                  {/* Dynamic Radiance Sunburst Rays */}
+                  <line x1="32" y1="5" x2="32" y2="8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  <line x1="21" y1="9" x2="23" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="43" y1="9" x2="41" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="16" y1="18" x2="19" y2="19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="48" y1="18" x2="45" y2="19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
               </div>
               <div>
                 <h1 className="text-xl font-extrabold tracking-tight">IIT BHU Smart Room Scheduler</h1>
@@ -878,6 +956,18 @@ export default function App() {
 
             {/* Profile info & Signout */}
             <div className="flex flex-wrap items-center justify-center gap-3">
+              {/* Theme Toggle Button */}
+              <button
+                onClick={() => setIsDarkMode(!isDarkMode)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-800 bg-slate-1000/60 p-2.5 hover:border-slate-700 text-slate-400 hover:text-white transition-all font-semibold text-xs cursor-pointer select-none"
+                title="Switch Theme (Light/Dark)"
+              >
+                {isDarkMode ? <Sun className="w-4 h-4 text-amber-500 animate-spin-slow" /> : <Moon className="w-4 h-4 text-indigo-400" />}
+                <span className="hidden sm:inline font-mono text-[9.5px] tracking-wider uppercase">
+                  {isDarkMode ? 'Light' : 'Dark'}
+                </span>
+              </button>
+
               <div className="font-mono text-[11px] text-slate-400 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 hidden lg:block">
                 {currentTime || 'Syncing...'}
               </div>
@@ -1113,6 +1203,37 @@ export default function App() {
             </div>
           </div>
 
+          {isIframe && !googleWorkspaceLinked && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-amber-950/90 border border-amber-800/60 p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-left relative overflow-hidden shadow-2xl"
+            >
+              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
+              <div className="flex items-start gap-3 relative z-10">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="font-bold text-amber-300 text-xs uppercase tracking-wider font-mono">Google AI Studio Sandbox Guard</h4>
+                  <p className="text-xs text-amber-200/95 leading-relaxed max-w-2xl">
+                    This app experiences iframe restrictions inside Google AI Studio's preview window which may block standard Google SSO popup windows.
+                  </p>
+                  <p className="text-[11.5px] font-semibold text-amber-400/90 leading-relaxed">
+                    💡 <strong>To link successfully:</strong> Click the <strong>"Open in New Tab"</strong> button in the upper-right corner of AI Studio, and link authentication from there!
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  window.open(window.location.href, '_blank');
+                }}
+                className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-[10.5px] uppercase tracking-wider px-4 py-2.5 rounded-xl transition-all shadow-md shrink-0 cursor-pointer flex items-center gap-1.5 select-none relative z-10 ml-auto md:ml-0"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Open In New Tab
+              </button>
+            </motion.div>
+          )}
+
           {/* Active Tab transition bounds */}
           <AnimatePresence mode="wait">
             <motion.div
@@ -1290,6 +1411,70 @@ export default function App() {
                                   {f}
                                 </span>
                               ))}
+                            </div>
+
+                            {/* Active Reservations isomorphically mapped for room tracking */}
+                            <div className="pt-3 border-t border-slate-800/65 mt-2 text-left">
+                              {(() => {
+                                const roomBookings = adminBookings.filter(b => 
+                                  b.room_name?.toLowerCase().includes(room.name.toLowerCase()) || 
+                                  room.name?.toLowerCase().includes(b.room_name?.toLowerCase())
+                                );
+
+                                return (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider font-mono flex items-center gap-1">
+                                        <Calendar className="w-3.5 h-3.5" />
+                                        Scheduled Timeline
+                                      </span>
+                                      <button
+                                        onClick={() => setSelectedRoomForHistory(room)}
+                                        className="text-[10px] font-bold text-indigo-400/95 hover:text-indigo-350 transition-all cursor-pointer underline underline-offset-2 decoration-indigo-500/30 font-mono"
+                                      >
+                                        View Activity History →
+                                      </button>
+                                    </div>
+
+                                    {roomBookings.length === 0 ? (
+                                      <p className="text-[10.5px] text-slate-500 italic">This space is completely vacant. Click below to book!</p>
+                                    ) : (
+                                      <div className="space-y-1.5 max-h-[145px] overflow-y-auto pr-1">
+                                        {roomBookings.map((b) => {
+                                          const startDate = new Date(b.start_time);
+                                          const endDate = new Date(b.end_time);
+                                          const isToday = startDate.toDateString() === new Date().toDateString();
+                                          
+                                          const dateStr = isToday 
+                                            ? 'Today' 
+                                            : startDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+                                          
+                                          const timeStr = `${startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+                                          return (
+                                            <div key={b.id} className="p-2.5 bg-slate-950/70 rounded-xl border border-slate-850/65 text-left space-y-0.5 hover:border-indigo-500/30 transition-all">
+                                              <div className="flex items-center justify-between gap-2">
+                                                <span className="font-bold text-slate-200 text-[11.5px] truncate max-w-[150px]" title={b.summary}>
+                                                  {b.summary}
+                                                </span>
+                                                <span className="text-[8.5px] bg-indigo-950/80 text-indigo-300 font-bold px-1 rounded uppercase tracking-wider font-mono">
+                                                  {dateStr}
+                                                </span>
+                                              </div>
+                                              <div className="flex items-center justify-between text-[10px] text-slate-450 font-mono">
+                                                <span>{timeStr}</span>
+                                                <span className="truncate max-w-[90px]" title={b.creator_name}>
+                                                  By: {b.creator_name?.split(' ')[0]}
+                                                </span>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>
@@ -1875,10 +2060,251 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* DYNAMIC ACTIVITY HISTORY DRAWER */}
+      <AnimatePresence>
+        {selectedRoomForHistory && (
+          <>
+            {/* Dark blur backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setSelectedRoomForHistory(null);
+                setHistorySearchQuery('');
+              }}
+              className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 cursor-pointer"
+            />
+
+            {/* Slide-out drawer panel */}
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+              className="fixed right-0 top-0 bottom-0 w-full sm:max-w-md bg-slate-900 border-l border-slate-800 shadow-2xl z-50 flex flex-col h-full text-slate-200 overflow-hidden"
+            >
+              {/* Header section with background pattern */}
+              <div className="relative p-6 border-b border-slate-800/80 shrink-0 bg-slate-950/40">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
+                
+                <div className="flex items-start justify-between gap-4 relative z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-indigo-950/80 text-indigo-400 border border-indigo-900/30 rounded-2xl">
+                      <History className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-0.5 text-left">
+                      <span className="text-[10px] font-mono tracking-wider text-slate-500 uppercase font-extrabold">Room Insights</span>
+                      <h3 className="text-md font-black text-white">{selectedRoomForHistory.name}</h3>
+                      <p className="text-[11px] text-slate-400">
+                        Detailed resource reservation activity archives.
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <button
+                    onClick={() => {
+                      setSelectedRoomForHistory(null);
+                      setHistorySearchQuery('');
+                    }}
+                    className="p-1.5 hover:bg-slate-850 text-slate-500 hover:text-white rounded-xl transition cursor-pointer border border-transparent hover:border-slate-800"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Live stats insights grid */}
+              {(() => {
+                const roomBookings = adminBookings.filter(b => 
+                  b.room_name?.toLowerCase().includes(selectedRoomForHistory.name.toLowerCase()) || 
+                  selectedRoomForHistory.name?.toLowerCase().includes(b.room_name?.toLowerCase())
+                );
+
+                const sortedBookings = [...roomBookings].sort(
+                  (a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
+                );
+
+                const filteredBookings = sortedBookings.filter(b => {
+                  if (!historySearchQuery.trim()) return true;
+                  const query = historySearchQuery.toLowerCase();
+                  return (
+                    b.summary?.toLowerCase().includes(query) ||
+                    b.creator_name?.toLowerCase().includes(query) ||
+                    b.creator_email?.toLowerCase().includes(query)
+                  );
+                });
+
+                const now = new Date();
+
+                return (
+                  <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                    {/* Bento Stat Badges */}
+                    <div className="p-6 grid grid-cols-2 gap-4 shrink-0 bg-slate-950/20 border-b border-slate-850/40">
+                      <div className="p-4 bg-slate-950/60 border border-slate-850 rounded-2xl text-left space-y-1">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest font-mono">Total Reservations</span>
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-2xl font-black text-white">{sortedBookings.length}</span>
+                          <span className="text-[10px] text-indigo-400 font-bold">logs</span>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-950/60 border border-slate-850 rounded-2xl text-left space-y-1">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest font-mono">Current Status</span>
+                        <div className="flex items-center gap-2 pt-1">
+                          <span className={`w-2 h-2 rounded-full ${selectedRoomForHistory.status === 'available' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-450 animate-pulse'}`} />
+                          <span className={`text-xs font-black uppercase font-mono ${selectedRoomForHistory.status === 'available' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {selectedRoomForHistory.status === 'available' ? 'AVAILABLE' : 'OCCUPIED'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Search bar inside the drawer */}
+                    <div className="px-6 pt-4 pb-2 shrink-0">
+                      <div className="relative">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                        <input
+                          id="history-drawer-search-input"
+                          type="text"
+                          value={historySearchQuery}
+                          onChange={(e) => setHistorySearchQuery(e.target.value)}
+                          placeholder="Filter bookings by user, email, or summary..."
+                          className="w-full bg-slate-950 hover:bg-slate-950/90 focus:bg-slate-950 border border-slate-800 focus:border-indigo-500/80 rounded-xl pl-9.5 pr-8.5 py-2 text-xs text-slate-200 placeholder-slate-550 focus:outline-none transition-all font-sans shadow-inner text-left"
+                        />
+                        {historySearchQuery && (
+                          <button
+                            id="clear-history-search-btn"
+                            onClick={() => setHistorySearchQuery('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-all cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Timeline logs */}
+                    <div className="p-6 flex-1 min-h-0 flex flex-col text-left">
+                      <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-mono mb-4 flex items-center gap-1.5">
+                        <Activity className="w-3.5 h-3.5 text-indigo-400" />
+                        Historical Action Feed
+                      </h4>
+
+                      {sortedBookings.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
+                          <div className="w-12 h-12 rounded-2xl bg-slate-950 flex items-center justify-center border border-slate-850">
+                            <Clock className="w-6 h-6 text-slate-600" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-400">No activity logged matching space</p>
+                            <p className="text-[11px] text-slate-600 mt-1 max-w-xs leading-relaxed">
+                              This student hub doesn't present historic timeline logs currently. It's fully ready for instant synchronization.
+                            </p>
+                          </div>
+                        </div>
+                      ) : filteredBookings.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
+                          <div className="w-12 h-12 rounded-2xl bg-slate-950 flex items-center justify-center border border-slate-850">
+                            <Search className="w-6 h-6 text-indigo-400/80 animate-pulse" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-300">No matching reservations found</p>
+                            <p className="text-[11px] text-slate-500 mt-1 max-w-xs leading-relaxed">
+                              Your search query <span className="text-indigo-400 font-mono">"{historySearchQuery}"</span> didn't match any reservation details.
+                            </p>
+                            <button
+                              onClick={() => setHistorySearchQuery('')}
+                              className="mt-4 px-3 py-1.5 bg-indigo-950/65 hover:bg-indigo-900/65 border border-indigo-900/40 text-indigo-300 rounded-lg text-[10.5px] font-bold uppercase transition-all tracking-wide cursor-pointer"
+                            >
+                              Clear Search Filter
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-6 overflow-y-auto pr-1 flex-1 pl-4 relative">
+                          {/* Left thin connecting guide line for timeline */}
+                          <div className="absolute left-1.5 top-2 bottom-2 w-0.5 bg-slate-800" />
+
+                          {filteredBookings.map((b) => {
+                            const startTime = new Date(b.start_time);
+                            const endTime = new Date(b.end_time);
+                            const isUpcoming = startTime >= now;
+                            const isActiveNow = startTime <= now && endTime >= now;
+
+                            return (
+                              <div key={b.id} className="relative text-left">
+                                {/* Bullet indicator absolute pin */}
+                                <div className="absolute -left-[20px] top-1.5 w-3 h-3 rounded-full bg-slate-900 border-2 border-slate-750 flex items-center justify-center z-10">
+                                  <div className={`w-1 h-1 rounded-full ${
+                                    isActiveNow ? 'bg-emerald-450 animate-ping' :
+                                    isUpcoming ? 'bg-indigo-400' : 'bg-slate-500'
+                                  }`} />
+                                </div>
+
+                                <div className="bg-slate-950/60 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-4 rounded-2xl space-y-2 transition-all shadow-md">
+                                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                                    <span className="font-extrabold text-xs text-white tracking-wide max-w-[180px] truncate" title={b.summary}>
+                                      {b.summary}
+                                    </span>
+                                    <span className={`text-[8px] font-black uppercase tracking-wider font-mono px-2 py-0.5 rounded border ${
+                                      isActiveNow ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/40' :
+                                      isUpcoming ? 'bg-indigo-950/80 text-indigo-300 border-indigo-800/40' :
+                                      'bg-slate-900/60 text-slate-400 border-slate-800/60'
+                                    }`}>
+                                      {isActiveNow ? 'ACTIVE NOW' : isUpcoming ? 'UPCOMING' : 'COMPLETED'}
+                                    </span>
+                                  </div>
+
+                                  <div className="space-y-1 font-mono text-[10px]">
+                                    <div className="flex items-center gap-1.5 text-slate-400">
+                                      <Clock className="w-3 h-3 text-indigo-400 shrink-0" />
+                                      <span>
+                                        {startTime.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                                        {' • '} 
+                                        {startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 text-slate-500 pt-0.5">
+                                      <UserCheck className="w-3 h-3 text-indigo-500 shrink-0" />
+                                      <span className="truncate max-w-[220px]" title={`${b.creator_name} (${b.creator_email})`}>
+                                        {b.creator_name || 'Anonymous User'} ({b.creator_email})
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Drawer footer summary */}
+              <div className="p-6 bg-slate-950/50 border-t border-slate-800/80 shrink-0 text-center">
+                <button
+                  onClick={() => {
+                    setSelectedRoomForHistory(null);
+                    setHistorySearchQuery('');
+                  }}
+                  className="w-full bg-slate-850 hover:bg-slate-800 border border-slate-700/60 text-slate-300 font-bold py-2.5 px-4 rounded-xl text-xs uppercase cursor-pointer transition-all"
+                >
+                  Close Insights Drawer
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Footer Branding */}
       <footer className="py-6 border-t border-slate-900/80 mt-12 bg-slate-900/40">
         <div className="max-w-7xl mx-auto px-6 text-center text-slate-500 text-[10px] font-mono uppercase tracking-wider space-y-1">
-          <span>Indian Institute of Technology (BHU) Varanasi</span><br />
+          <span>created by srishti pathak iit bhu 2026</span><br />
           <span>Smart Room reservation panel • connected to cloud postgres nodes</span>
         </div>
       </footer>
