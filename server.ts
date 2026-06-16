@@ -26,11 +26,22 @@ app.use(express.json());
 // ==========================================
 // DB ARCHITECTURE: DUAL SUPABASE / REGIONAL FALLBACK ENGINE
 // ==========================================
+// Helper to check if a string is a valid HTTP/HTTPS URL
+const isValidUrl = (url: string): boolean => {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 
 let supabase: any = null;
-const isSupabaseConfigured = SUPABASE_URL !== '' && SUPABASE_ANON_KEY !== '';
+const isSupabaseConfigured = SUPABASE_URL !== '' && SUPABASE_ANON_KEY !== '' && isValidUrl(SUPABASE_URL);
 
 if (isSupabaseConfigured) {
   try {

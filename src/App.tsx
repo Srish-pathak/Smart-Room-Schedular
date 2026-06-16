@@ -80,7 +80,8 @@ import {
   Moon,
   ExternalLink,
   X,
-  History
+  History,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -91,9 +92,10 @@ interface WorkspaceGateProps {
   isIframe: boolean;
   onLink: () => void;
   onBypass?: () => void;
+  isLinking?: boolean;
 }
 
-function WorkspaceGate({ activeTab, isIframe, onLink, onBypass }: WorkspaceGateProps) {
+function WorkspaceGate({ activeTab, isIframe, onLink, onBypass, isLinking }: WorkspaceGateProps) {
   return (
     <div className="max-w-xl mx-auto my-12 p-8 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-6 relative overflow-hidden">
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -110,16 +112,26 @@ function WorkspaceGate({ activeTab, isIframe, onLink, onBypass }: WorkspaceGateP
       <div className="space-y-3 relative z-10">
         <button
           onClick={onLink}
-          className="w-full py-3 bg-indigo-600 hover:bg-indigo-550 text-white font-semibold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer mx-auto"
+          disabled={isLinking}
+          className={`w-full py-3 bg-indigo-600 hover:bg-indigo-550 text-white font-semibold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer mx-auto ${
+            isLinking ? 'opacity-70 cursor-not-allowed' : ''
+          }`}
         >
-          <Link2 className="w-4 h-4" />
-          <span>Link Google Workspace Now</span>
+          {isLinking ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Link2 className="w-4 h-4" />
+          )}
+          <span>{isLinking ? 'Linking Google Account...' : 'Link Google Workspace Now'}</span>
         </button>
 
         {onBypass && (
           <button
             onClick={onBypass}
-            className="w-full py-2.5 bg-slate-950/80 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-amber-400/90 hover:text-amber-300 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer mx-auto shadow-md"
+            disabled={isLinking}
+            className={`w-full py-2.5 bg-slate-950/80 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-amber-400/90 hover:text-amber-300 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer mx-auto shadow-md ${
+              isLinking ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
             title="Bypass popup requirements and simulate Google Workspace for evaluation inside the sandbox"
           >
             <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
@@ -197,6 +209,8 @@ export default function App() {
   const [googleProfile, setGoogleProfile] = useState<any>(null);
   const [isIframe, setIsIframe] = useState(false);
 
+  const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
+
   // Resilient Custom Confirmation Modal state to replace window.confirm blocks (which crash inside sandbox iframes)
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -206,6 +220,7 @@ export default function App() {
     confirmText?: string;
     cancelText?: string;
     isDanger?: boolean;
+    onCancel?: () => void;
   } | null>(null);
 
   useEffect(() => {
@@ -218,6 +233,7 @@ export default function App() {
 
   // Notifications states
   const [notifications, setNotifications] = useState<any[]>([]);
+  const safeNotifications = Array.isArray(notifications) ? notifications : [];
   const [showNotifications, setShowNotifications] = useState(false);
 
   // Filters state for Rooms Directory
@@ -358,7 +374,7 @@ export default function App() {
       // 5. Fetch live notifications
       try {
         const notifList = await notificationsAPI.list();
-        setNotifications(notifList);
+        setNotifications(Array.isArray(notifList) ? notifList : []);
       } catch (ne) {
         console.warn('Could not populate live notifications:', ne);
       }
@@ -403,7 +419,7 @@ export default function App() {
   const handleMarkNotificationsRead = async () => {
     try {
       await notificationsAPI.markAllRead();
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setNotifications((prev) => (Array.isArray(prev) ? prev : []).map((n) => ({ ...n, read: true })));
     } catch (err) {
       console.warn('Failed marking notifications read:', err);
     }
@@ -415,7 +431,7 @@ export default function App() {
     const intervalIdx = setInterval(() => {
       notificationsAPI.list()
         .then((notifList) => {
-          setNotifications(notifList);
+          setNotifications(Array.isArray(notifList) ? notifList : []);
         })
         .catch(() => {});
     }, 8000);
@@ -478,12 +494,12 @@ export default function App() {
           console.log('🔔 Realtime Notifications Update witnessed:', payload);
           if (payload.eventType === 'INSERT') {
             // Append the new notification to state immediately
-            setNotifications((prev) => [payload.new, ...prev].slice(0, 50));
+            setNotifications((prev) => [payload.new, ...(Array.isArray(prev) ? prev : [])].slice(0, 50));
             addToast(`System Notification: ${payload.new.title}`, 'info');
           } else {
             // Hot reload full notification panel
             notificationsAPI.list()
-              .then((list) => setNotifications(list))
+              .then((list) => setNotifications(Array.isArray(list) ? list : []))
               .catch(() => {});
           }
         }
@@ -576,6 +592,8 @@ export default function App() {
   };
 
   const linkGoogleWorkspaceAccount = async () => {
+    if (isLinkingGoogle) return;
+    setIsLinkingGoogle(true);
     try {
       const result = await googleSignIn();
       if (result) {
@@ -614,10 +632,15 @@ export default function App() {
             isDanger: false,
             onConfirm: () => {
               bypassGoogleWorkspaceAuthSimulated();
+            },
+            onCancel: () => {
+              window.open(window.location.href, '_blank');
             }
           });
         }, 300);
       }
+    } finally {
+      setIsLinkingGoogle(false);
     }
   };
 
@@ -1114,14 +1137,14 @@ export default function App() {
                     }
                   }}
                   className={`relative p-2.5 rounded-xl border transition-all cursor-pointer ${
-                    notifications.some((n) => !n.read)
+                    safeNotifications.some((n) => !n.read)
                       ? 'bg-indigo-950/60 border-indigo-800 text-indigo-300 animate-pulse'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                   title="Academy Schedule System Notifications Inbox"
                 >
                   <Bell className="w-4 h-4" />
-                  {notifications.some((n) => !n.read) && (
+                  {safeNotifications.some((n) => !n.read) && (
                     <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-rose-500 rounded-full border border-slate-950" />
                   )}
                 </button>
@@ -1148,11 +1171,11 @@ export default function App() {
                       </div>
                       
                       <div className="max-h-64 overflow-y-auto divide-y divide-slate-850/60">
-                        {notifications.length === 0 ? (
-                          <div className="p-6 text-center text-xs text-slate-500 italic">No notifications registered.</div>
+                        {safeNotifications.length === 0 ? (
+                           <div className="p-6 text-center text-xs text-slate-500 italic">No notifications registered.</div>
                         ) : (
-                          notifications.map((notif) => (
-                            <div key={notif.id} className="p-3.5 space-y-1 hover:bg-slate-950 transition-colors">
+                          safeNotifications.map((notif) => (
+                            <div key={notif.id || Math.random()} className="p-3.5 space-y-1 hover:bg-slate-950 transition-colors">
                               <div className="flex justify-between items-start gap-2">
                                 <span className={`text-[10.5px] font-bold block leading-snug ${
                                   notif.type === 'success' ? 'text-emerald-400' :
@@ -1166,7 +1189,7 @@ export default function App() {
                               </div>
                               <p className="text-[10.5px] text-slate-450 leading-normal">{notif.message}</p>
                               <span className="text-[8.5px] font-mono text-slate-600 block">
-                                {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {new Date(notif.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </span>
                             </div>
                           ))
@@ -1180,15 +1203,28 @@ export default function App() {
               {/* Dynamic Google Link pill */}
               <button
                 onClick={linkGoogleWorkspaceAccount}
+                disabled={isLinkingGoogle}
                 className={`flex items-center gap-1.5 text-[10px] font-bold uppercase py-1.5 px-3 rounded-xl border transition-all ${
                   googleWorkspaceLinked
                     ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/40'
+                    : isLinkingGoogle 
+                    ? 'bg-indigo-950/60 text-indigo-300 border-indigo-800/40 opacity-75'
                     : 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border-rose-800/40 animate-pulse'
                 }`}
                 title="Google Account Auth scope binder button"
               >
-                <Link2 className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Google Sync: {googleWorkspaceLinked ? 'CONNECTED' : 'UNLINKED / LINK NOW'}</span>
+                {isLinkingGoogle ? (
+                  <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+                ) : (
+                  <Link2 className="w-3.5 h-3.5 text-indigo-400" />
+                )}
+                <span>
+                  {googleWorkspaceLinked 
+                    ? 'CONNECTED' 
+                    : isLinkingGoogle 
+                    ? 'SYNCING...' 
+                    : 'UNLINKED / LINK NOW'}
+                </span>
               </button>
 
               {/* Identity tag */}
@@ -1666,6 +1702,7 @@ export default function App() {
                       isIframe={isIframe}
                       onLink={linkGoogleWorkspaceAccount}
                       onBypass={bypassGoogleWorkspaceAuthSimulated}
+                      isLinking={isLinkingGoogle}
                     />
                   ) : (
                     <CalendarWidget
@@ -2018,6 +2055,7 @@ export default function App() {
                     isIframe={isIframe}
                     onLink={linkGoogleWorkspaceAccount}
                     onBypass={bypassGoogleWorkspaceAuthSimulated}
+                    isLinking={isLinkingGoogle}
                   />
                 ) : (
                   <DriveWidget receiptLogs={sessionReceipts} />
@@ -2031,6 +2069,7 @@ export default function App() {
                     isIframe={isIframe}
                     onLink={linkGoogleWorkspaceAccount}
                     onBypass={bypassGoogleWorkspaceAuthSimulated}
+                    isLinking={isLinkingGoogle}
                   />
                 ) : (
                   <GmailWidget 
@@ -2048,6 +2087,7 @@ export default function App() {
                     isIframe={isIframe}
                     onLink={linkGoogleWorkspaceAccount}
                     onBypass={bypassGoogleWorkspaceAuthSimulated}
+                    isLinking={isLinkingGoogle}
                   />
                 ) : (
                   <ChatWidget 
@@ -2064,6 +2104,7 @@ export default function App() {
                     isIframe={isIframe}
                     onLink={linkGoogleWorkspaceAccount}
                     onBypass={bypassGoogleWorkspaceAuthSimulated}
+                    isLinking={isLinkingGoogle}
                   />
                 ) : (
                   <FormsWidget />

@@ -91,6 +91,8 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     console.error('Sign in error:', error);
     if (error.code === 'auth/cancelled-popup-request') {
       throw new Error('The login popup was closed or cancelled. To bypass Google AI Studio iframe sandbox rules, please open the app in a new tab.');
+    } else if (error.code === 'auth/popup-closed-by-user') {
+      throw new Error('The login popup was closed before completion. If you are inside the Google AI Studio sandbox iframe, please choose Dynamic Demo Mode, or click "Open in New Tab" in the top right.');
     } else if (error.code === 'auth/popup-blocked') {
       throw new Error('The Google login popup was blocked by your browser. Please click the "Open in New Tab" button in the top right to link your account or choose Demo Mode.');
     } else if (error.code === 'auth/internal-error') {
