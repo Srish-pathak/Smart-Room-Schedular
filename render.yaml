@@ -1,0 +1,13 @@
+# Render Infrastructure-as-Code Configuration
+# Push this file to your GitHub repository to automatically configure the service.
+services:
+  - type: web
+    name: smart-room-scheduler
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000

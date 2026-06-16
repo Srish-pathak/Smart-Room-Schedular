@@ -156,6 +156,57 @@ export default function CalendarWidget({
     }
   }, [conflicts, date, startTime, endTime]);
 
+  // Compute database and calendar events for the selected room on the selected date for visual timeline layout
+  const dailyOccupancy = useMemo(() => {
+    if (!selectedRoomName) return [];
+    try {
+      return events.filter((e) => {
+        const loc = (e.location || '').toLowerCase();
+        if (!loc.includes(selectedRoomName.toLowerCase())) return false;
+
+        const sDate = e.start?.dateTime || e.start?.date;
+        if (!sDate) return false;
+
+        const d = new Date(sDate).toISOString().split('T')[0];
+        return d === date;
+      }).map((e) => {
+        const sStr = e.start?.dateTime || e.start?.date || '';
+        const eStr = e.end?.dateTime || e.end?.date || '';
+        const st = new Date(sStr);
+        const et = new Date(eStr);
+        
+        const startMin = st.getHours() * 60 + st.getMinutes();
+        const endMin = et.getHours() * 60 + et.getMinutes();
+        
+        return {
+          id: e.id,
+          summary: e.summary || 'Reserved Slot',
+          startMin,
+          endMin,
+          startStr: st.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          endStr: et.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+      });
+    } catch {
+      return [];
+    }
+  }, [events, selectedRoomName, date]);
+
+  // Translate user-selected start/end times into minutes from midnight for layout positioning
+  const userSelectedRange = useMemo(() => {
+    try {
+      const [sh, sm] = startTime.split(':').map(Number);
+      const [eh, em] = endTime.split(':').map(Number);
+      if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return null;
+      return {
+        startMin: sh * 60 + sm,
+        endMin: eh * 60 + em,
+      };
+    } catch {
+      return null;
+    }
+  }, [startTime, endTime]);
+
   const fetchCalendarEvents = async () => {
     setLoading(true);
     setError(null);
@@ -641,6 +692,109 @@ export default function CalendarWidget({
                   onChange={(e) => setEndTime(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-sm text-slate-100 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
                 />
+              </div>
+
+              {/* DYNAMIC TIMELINE & VISUAL OVERLAP WARNING */}
+              <div className="p-4 bg-slate-950/50 border border-slate-800 rounded-2xl space-y-3.5 mt-4 text-left">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-350 flex items-center gap-1.5 font-sans">
+                    <Clock className="w-4 h-4 text-indigo-400" />
+                    Timeline Availability Indicator
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500 font-bold bg-slate-900 border border-slate-800 px-2 py-0.5 rounded">
+                    7:00 AM – 9:00 PM
+                  </span>
+                </div>
+
+                {/* Timeline visual bar track */}
+                <div className="relative h-15 bg-slate-950 border border-slate-900/40 rounded-xl overflow-hidden select-none">
+                  {/* Grid Lines for Hours (Every 2 hours) */}
+                  {[8, 10, 12, 14, 16, 18, 20].map((hour) => {
+                    const pct = ((hour * 60 - 420) / 840) * 100;
+                    return (
+                      <div
+                        key={hour}
+                        className="absolute inset-y-0 border-l border-slate-900/60 pointer-events-none flex flex-col justify-end pb-1 z-0"
+                        style={{ left: `${pct}%` }}
+                      >
+                        <span className="text-[8px] font-mono text-slate-650 block pl-1 transform scale-90 origin-left font-bold">
+                          {hour > 12 ? `${hour - 12}PM` : hour === 12 ? '12PM' : `${hour}AM`}
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  {/* Layer 1: Existing Occupied slots in Room */}
+                  {dailyOccupancy.map((occ, idx) => {
+                    const left = Math.max(0, Math.min(100, ((occ.startMin - 420) / 840) * 100));
+                    const right = Math.max(0, Math.min(100, ((occ.endMin - 420) / 840) * 100));
+                    const width = Math.max(1.5, right - left);
+                    return (
+                      <div
+                        key={occ.id || idx}
+                        className="absolute top-2 h-6 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-md text-[9px] font-mono flex items-center justify-center text-slate-400 overflow-hidden px-1.5 cursor-help transition-all group/occ z-10"
+                        style={{ left: `${left}%`, width: `${width}%` }}
+                        title={`${occ.summary} (${occ.startStr} - ${occ.endStr})`}
+                      >
+                        {width > 12 && (
+                          <span className="truncate max-w-full scale-90 font-medium block">
+                            {occ.summary}
+                          </span>
+                        )}
+                        {/* Interactive tooltip hover element */}
+                        <div className="absolute top-full mb-1 opacity-0 group-hover/occ:opacity-100 bg-slate-900 border border-slate-800 text-slate-300 px-2 py-1.5 rounded-lg text-[9px] whitespace-nowrap z-30 transition-all shadow-xl pointer-events-none -translate-y-11">
+                          <strong className="text-white block">{occ.summary}</strong>
+                          <span className="text-slate-400 font-mono mt-0.5 block">{occ.startStr} – {occ.endStr}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Layer 2: Selected slot highlight with responsive color change if conflict / overlap exists */}
+                  {userSelectedRange && (
+                    <div
+                      className={`absolute top-1.5 h-7 rounded-md flex items-center justify-center transition-all z-20 ${
+                        conflicts.length > 0
+                          ? 'bg-rose-500/25 border-2 border-rose-500 shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse'
+                          : 'bg-emerald-500/20 border-2 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                      }`}
+                      style={{
+                        left: `${Math.max(0, Math.min(100, ((userSelectedRange.startMin - 420) / 840) * 100))}%`,
+                        width: `${Math.max(2, Math.min(100, (((userSelectedRange.endMin - userSelectedRange.startMin) - 0) / 840) * 100))}%`
+                      }}
+                    >
+                      <span className={`text-[8px] font-mono font-black tracking-wider px-1 text-center scale-90 ${
+                        conflicts.length > 0 ? 'text-rose-450 text-shadow-sm animate-pulse' : 'text-emerald-450'
+                      }`}>
+                        {conflicts.length > 0 ? 'OVERLAP ALERT' : 'YOUR SELECTION'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Timeline Status Legends & Conflict warnings */}
+                <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 font-mono flex-wrap gap-2">
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-1.5 rounded-sm bg-slate-800 border border-slate-750" />
+                      Occupied Hours
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-1.5 rounded-sm bg-emerald-500/20 border border-emerald-500" />
+                      Proposed Slot
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-1.5 rounded-sm bg-rose-500/25 border border-rose-500" />
+                      Overlap Warning
+                    </span>
+                  </div>
+                  {conflicts.length > 0 && (
+                    <span className="text-rose-400 font-bold flex items-center gap-1 select-none animate-bounce">
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                      BOOKING OVERLAPS INSTANTLY
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Conflict Status Warning & Smart Resolvers Section */}

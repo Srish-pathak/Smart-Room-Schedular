@@ -73,9 +73,9 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 
     const signInPromise = signInWithPopup(auth, provider);
     const timeoutPromise = new Promise<never>((_, reject) => {
-      const err: any = new Error('Firebase Auth operation timed out. This is typically caused by browser popup blockers in the iframe sandbox. Please click the "Open in New Tab" button in the upper right and link your account there.');
+      const err: any = new Error('Firebase Auth operation timed out. If you are taking standard steps to select an account, please try again. If the popup didn\'t open at all, ensure popups are permitted or click the "Open in New Tab" button in the upper right.');
       err.code = 'auth/popup-blocked';
-      setTimeout(() => reject(err), 4000);
+      setTimeout(() => reject(err), 120000); // Expanded timeout to 120 seconds
     });
 
     const result = await Promise.race([signInPromise, timeoutPromise]);
@@ -92,9 +92,13 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     if (error.code === 'auth/cancelled-popup-request') {
       throw new Error('The login popup was closed or cancelled. To bypass Google AI Studio iframe sandbox rules, please open the app in a new tab.');
     } else if (error.code === 'auth/popup-blocked') {
-      throw new Error('The Google login popup was blocked by your browser. Please click the "Open in New Tab" button in the top right to link your account.');
+      throw new Error('The Google login popup was blocked by your browser. Please click the "Open in New Tab" button in the top right to link your account or choose Demo Mode.');
     } else if (error.code === 'auth/internal-error') {
-      throw new Error('Internal Firebase authentication error within the sandbox. Try logging in after opening the app in its own tab.');
+      throw new Error('Internal Firebase authentication error within the sandbox. Try logging in after opening the app in its own tab, or check Firebase settings.');
+    } else if (error.code === 'auth/unauthorized-domain') {
+      throw new Error(`Unauthorized Domain: The current domain "${window.location.hostname}" is not authorized in your Firebase console. Please add it under: Firebase Auth -> Settings -> Authorized Domains.`);
+    } else if (error.code === 'auth/operation-not-allowed') {
+      throw new Error('Operation Not Allowed: Google Sign-index Provider is disabled in your Firebase Auth suite. Please enable Google under Authentication -> Sign-in Method.');
     }
     throw error;
   } finally {

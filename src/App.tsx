@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { initAuth, googleSignIn, logout } from './lib/auth';
+import { initAuth, googleSignIn, logout, resetGoogleSignInLock } from './lib/auth';
 import { Room } from './types';
 import {
   authAPI,
@@ -226,6 +226,10 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortKey, setSortKey] = useState<'default' | 'capacity-asc' | 'capacity-desc' | 'available-first' | 'booked-first'>('default');
 
+  // Auto-refresh timer states for Rooms Directory
+  const [roomsRefreshCountdown, setRoomsRefreshCountdown] = useState<number>(60);
+  const [isRefreshingRooms, setIsRefreshingRooms] = useState<boolean>(false);
+
   // Selection states for modal confirmation overlay to prevent accidental bookings
   const [confirmRoomSelection, setConfirmRoomSelection] = useState<Room | null>(null);
   const [preselectedRoomId, setPreselectedRoomId] = useState<string>('');
@@ -358,10 +362,43 @@ export default function App() {
       } catch (ne) {
         console.warn('Could not populate live notifications:', ne);
       }
+
+      // Reset auto-refresh timer upon successful fetch
+      setRoomsRefreshCountdown(60);
     } catch (err: any) {
       console.error('Failed loading resources:', err);
     }
   };
+
+  // Implement automatic background refresh timer for Rooms Directory database sync every 60 seconds
+  useEffect(() => {
+    if (!token) return;
+
+    const intervalId = setInterval(() => {
+      setRoomsRefreshCountdown((prev) => {
+        if (prev <= 1) {
+          setIsRefreshingRooms(true);
+          // Fetch fresh rooms and bookings to ensure availability statuses are instantly up-to-date
+          Promise.all([roomsAPI.list(), bookingsAPI.list()])
+            .then(([refreshedRooms, refreshedBookings]) => {
+              setRooms(refreshedRooms);
+              setAdminBookings(refreshedBookings);
+              console.log('🔄 Rooms Directory automatically synced with Postgres database (60s timer)');
+            })
+            .catch((err) => {
+              console.error('Auto-refresh failed:', err);
+            })
+            .finally(() => {
+              setIsRefreshingRooms(false);
+            });
+          return 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [token]);
 
   const handleMarkNotificationsRead = async () => {
     try {
@@ -549,19 +586,22 @@ export default function App() {
       }
     } catch (err: any) {
       console.error(err);
+      resetGoogleSignInLock();
       const msg = err instanceof Error ? err.message : 'Popup blocker active or login dismissed.';
       addToast(msg, 'info');
 
       // Intercept and detect popup blocks typical in Google AI Studio iframes
       const lowerMsg = msg.toLowerCase();
       const isPopupBlock = 
-        lowerMsg.includes('popup-blocked') || 
-        lowerMsg.includes('popup blocked') || 
-        lowerMsg.includes('popup blocker') ||
+        isIframe ||
+        lowerMsg.includes('popup') || 
+        lowerMsg.includes('blocked') || 
         lowerMsg.includes('timeout') ||
         lowerMsg.includes('timed out') ||
         lowerMsg.includes('cancelled-popup') ||
-        lowerMsg.includes('closed');
+        lowerMsg.includes('closed') ||
+        lowerMsg.includes('progress') ||
+        lowerMsg.includes('already in progress');
 
       if (isPopupBlock) {
         setTimeout(() => {
@@ -1342,8 +1382,14 @@ export default function App() {
                 <div className="space-y-6">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4.5 bg-slate-900 rounded-2xl border border-slate-800 gap-4">
                     <div>
-                      <h2 className="text-lg font-bold tracking-tight">Active Room Directory</h2>
-                      <p className="text-xs text-slate-400 mt-0.5">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h2 className="text-lg font-bold tracking-tight">Active Room Directory</h2>
+                        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-indigo-950/80 text-indigo-400 border border-indigo-900/60 transition-all select-none font-mono">
+                          <Clock className={`w-3.5 h-3.5 ${isRefreshingRooms ? 'animate-spin text-emerald-400' : 'text-indigo-400'}`} />
+                          {isRefreshingRooms ? 'SYNCING DATABASE...' : `AUTO-SYNC IN ${roomsRefreshCountdown}S`}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1.5">
                         Inspect custom built-in configurations and track space utilization states in real time.
                       </p>
                     </div>
