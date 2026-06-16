@@ -22,6 +22,7 @@ provider.setCustomParameters({
 });
 
 let isSigningIn = false;
+let lastSignInTime = 0;
 let cachedAccessToken: string | null = sessionStorage.getItem('google_workspace_access_token');
 
 // Initialize auth state listener
@@ -37,9 +38,6 @@ export const initAuth = (
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
-        // If logged into Firebase but cachedAccessToken is not populated, 
-        // we might need them to click sign in again to refresh/fetch token,
-        // but typically signInWithPopup takes care of it.
         if (onAuthFailure) onAuthFailure();
       }
     } else {
@@ -50,13 +48,22 @@ export const initAuth = (
   });
 };
 
+// Reset function if needed
+export const resetGoogleSignInLock = () => {
+  isSigningIn = false;
+  lastSignInTime = 0;
+};
+
 // Must be called from a button click or user interaction
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
-  if (isSigningIn) {
+  const now = Date.now();
+  if (isSigningIn && (now - lastSignInTime < 4000)) {
     throw new Error('A Google authentication request is already in progress. Please check if a popup window has already opened, or allow popups and try again.');
   }
+  
   try {
     isSigningIn = true;
+    lastSignInTime = now;
     
     // Check if running in an iframe context
     const isIframe = window.self !== window.top;
@@ -68,7 +75,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     const timeoutPromise = new Promise<never>((_, reject) => {
       const err: any = new Error('Firebase Auth operation timed out. This is typically caused by browser popup blockers in the iframe sandbox. Please click the "Open in New Tab" button in the upper right and link your account there.');
       err.code = 'auth/popup-blocked';
-      setTimeout(() => reject(err), 12000);
+      setTimeout(() => reject(err), 4000);
     });
 
     const result = await Promise.race([signInPromise, timeoutPromise]);

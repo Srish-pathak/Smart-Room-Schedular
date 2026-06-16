@@ -90,9 +90,10 @@ interface WorkspaceGateProps {
   activeTab: string;
   isIframe: boolean;
   onLink: () => void;
+  onBypass?: () => void;
 }
 
-function WorkspaceGate({ activeTab, isIframe, onLink }: WorkspaceGateProps) {
+function WorkspaceGate({ activeTab, isIframe, onLink, onBypass }: WorkspaceGateProps) {
   return (
     <div className="max-w-xl mx-auto my-12 p-8 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-6 relative overflow-hidden">
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -106,16 +107,29 @@ function WorkspaceGate({ activeTab, isIframe, onLink }: WorkspaceGateProps) {
         </p>
       </div>
 
-      <button
-        onClick={onLink}
-        className="w-full py-3 bg-indigo-600 hover:bg-indigo-505 text-white font-semibold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer relative z-10 mx-auto"
-      >
-        <Link2 className="w-4 h-4" />
-        <span>Link Google Workspace Now</span>
-      </button>
+      <div className="space-y-3 relative z-10">
+        <button
+          onClick={onLink}
+          className="w-full py-3 bg-indigo-600 hover:bg-indigo-550 text-white font-semibold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer mx-auto"
+        >
+          <Link2 className="w-4 h-4" />
+          <span>Link Google Workspace Now</span>
+        </button>
+
+        {onBypass && (
+          <button
+            onClick={onBypass}
+            className="w-full py-2.5 bg-slate-950/80 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-amber-400/90 hover:text-amber-300 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer mx-auto shadow-md"
+            title="Bypass popup requirements and simulate Google Workspace for evaluation inside the sandbox"
+          >
+            <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span>Simulate / Bypass Popup (Demo Mode)</span>
+          </button>
+        )}
+      </div>
 
       {isIframe && (
-        <div className="bg-amber-950/40 border border-amber-900/40 p-5 rounded-2xl text-left space-y-2 relative z-10 mt-4">
+        <div className="bg-amber-950/40 border border-amber-900/40 p-5 rounded-2xl text-left space-y-2.5 relative z-10 mt-4">
           <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5 font-mono uppercase tracking-wider">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
             <span>Iframe Sandbox Warning</span>
@@ -126,6 +140,17 @@ function WorkspaceGate({ activeTab, isIframe, onLink }: WorkspaceGateProps) {
           <div className="p-2.5 bg-amber-950/60 rounded-xl border border-amber-850/20 text-[10.5px] font-semibold text-amber-250 leading-relaxed">
             💡 <strong>Solution:</strong> Look at the <strong>toolbar / tabs in Google AI Studio</strong> (top right) and click the <strong>"Open in New Tab"</strong> button. Linking and synchronizing will work perfectly from there!
           </div>
+          {onBypass && (
+            <div className="pt-1.5 border-t border-amber-900/40">
+              <button
+                onClick={onBypass}
+                className="w-full py-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
+              >
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <span>Instantly Bypass with Demo Sync</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -171,6 +196,17 @@ export default function App() {
   const [googleWorkspaceLinked, setGoogleWorkspaceLinked] = useState(false);
   const [googleProfile, setGoogleProfile] = useState<any>(null);
   const [isIframe, setIsIframe] = useState(false);
+
+  // Resilient Custom Confirmation Modal state to replace window.confirm blocks (which crash inside sandbox iframes)
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmText?: string;
+    cancelText?: string;
+    isDanger?: boolean;
+  } | null>(null);
 
   useEffect(() => {
     setIsIframe(window.self !== window.top);
@@ -470,15 +506,36 @@ export default function App() {
   };
 
   const handleSignout = () => {
-    const confirm = window.confirm('Are you sure you want to exit the scheduling office?');
-    if (!confirm) return;
-    setSessionToken(null);
-    sessionStorage.removeItem('google_workspace_access_token');
-    setUser(null);
-    setToken(null);
-    setGoogleWorkspaceLinked(false);
-    setNeedsAuth(true);
-    addToast('Credentials session closed safely.', 'info');
+    setConfirmModal({
+      isOpen: true,
+      title: 'Sign Out Account?',
+      message: 'Are you sure you want to sign out of the academic scheduling office? This will end your current secure browser session.',
+      confirmText: 'Sign Out',
+      cancelText: 'Keep Session Open',
+      isDanger: true,
+      onConfirm: () => {
+        setSessionToken(null);
+        sessionStorage.removeItem('google_workspace_access_token');
+        setUser(null);
+        setToken(null);
+        setGoogleWorkspaceLinked(false);
+        setNeedsAuth(true);
+        addToast('Credentials session closed safely.', 'info');
+      }
+    });
+  };
+
+  const bypassGoogleWorkspaceAuthSimulated = () => {
+    const mockUser = {
+      displayName: user?.name || 'Prof. Rajeev Kumar',
+      email: user?.email || 'rajeev.kumar@iitbhu.ac.in',
+      photoURL: null,
+      uid: 'mock-google-user-id'
+    };
+    sessionStorage.setItem('google_workspace_access_token', 'mock_google_workspace_token');
+    setGoogleProfile(mockUser);
+    setGoogleWorkspaceLinked(true);
+    addToast('Bypassed browser blocker! Google Workspace Simulator active inside sandbox.', 'success');
   };
 
   const linkGoogleWorkspaceAccount = async () => {
@@ -494,6 +551,33 @@ export default function App() {
       console.error(err);
       const msg = err instanceof Error ? err.message : 'Popup blocker active or login dismissed.';
       addToast(msg, 'info');
+
+      // Intercept and detect popup blocks typical in Google AI Studio iframes
+      const lowerMsg = msg.toLowerCase();
+      const isPopupBlock = 
+        lowerMsg.includes('popup-blocked') || 
+        lowerMsg.includes('popup blocked') || 
+        lowerMsg.includes('popup blocker') ||
+        lowerMsg.includes('timeout') ||
+        lowerMsg.includes('timed out') ||
+        lowerMsg.includes('cancelled-popup') ||
+        lowerMsg.includes('closed');
+
+      if (isPopupBlock) {
+        setTimeout(() => {
+          setConfirmModal({
+            isOpen: true,
+            title: 'Google Login Popup Blocked',
+            message: 'To bypass browser popup blockers standard within iframe sandboxes, you can:\n\n1. Use the "Open in New Tab" button in the top-right to log in using standard SSO, OR\n2. Activate the integrated Workspace Simulator (Demo Mode) to immediately unlock and evaluate scheduling modules.',
+            confirmText: 'Activate Workspace Simulator',
+            cancelText: 'Cancel & Open New Tab',
+            isDanger: false,
+            onConfirm: () => {
+              bypassGoogleWorkspaceAuthSimulated();
+            }
+          });
+        }, 300);
+      }
     }
   };
 
@@ -550,20 +634,28 @@ export default function App() {
       setAdminRoomFeatures('');
       fetchDashboardModels(user.role);
     } catch (err: any) {
-      alert(`Admin operation error: ${err.message}`);
+      addToast(`Admin operation error: ${err.message}`, 'error');
     }
   };
 
   const handleAdminDeleteRoom = async (id: string, name: string) => {
-    const approved = window.confirm(`Permanently decommission "${name}"? This deletes all associated bookings.`);
-    if (!approved) return;
-    try {
-      await roomsAPI.delete(id);
-      addToast(`Space ${name} decommissioned from database.`, 'success');
-      fetchDashboardModels(user.role);
-    } catch (err: any) {
-      alert(err.message);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Decommission Smart Space?',
+      message: `Are you sure you want to permanently decommission "${name}"?\n\nThis is a highly destructive database operation that will instantly purge all academic Schedules and student Bookings linked with this room space.`,
+      confirmText: 'Decommission',
+      cancelText: 'Cancel',
+      isDanger: true,
+      onConfirm: async () => {
+        try {
+          await roomsAPI.delete(id);
+          addToast(`Space ${name} decommissioned from database.`, 'success');
+          fetchDashboardModels(user.role);
+        } catch (err: any) {
+          addToast(err.message, 'error');
+        }
+      }
+    });
   };
 
   const handleAdminUpdateUserRole = async (userId: string, targetRole: string) => {
@@ -572,7 +664,7 @@ export default function App() {
       addToast('User organizational authorization level changed.', 'success');
       fetchDashboardModels(user.role);
     } catch (err: any) {
-      alert(err.message);
+      addToast(err.message, 'error');
     }
   };
 
@@ -1527,6 +1619,7 @@ export default function App() {
                       activeTab="calendar"
                       isIframe={isIframe}
                       onLink={linkGoogleWorkspaceAccount}
+                      onBypass={bypassGoogleWorkspaceAuthSimulated}
                     />
                   ) : (
                     <CalendarWidget
@@ -1810,12 +1903,24 @@ export default function App() {
                               <span className="text-[9px] text-slate-550 block font-mono">Reserved by: {b.creator_name} ({b.creator_email})</span>
                             </div>
                             <button
-                              onClick={async () => {
-                                const ans = window.confirm(`Permanently dropped booking "${b.summary}"?`);
-                                if (!ans) return;
-                                await bookingsAPI.delete(b.id);
-                                addToast('Booking dismissed.', 'success');
-                                fetchDashboardModels(user.role);
+                              onClick={() => {
+                                setConfirmModal({
+                                  isOpen: true,
+                                  title: 'Decommission Booking Request',
+                                  message: `Are you sure you want to permanently delete the booking "${b.summary}" for room "${b.room_name}"?\n\nThis academic slot will become instantly vacant for other student schedules.`,
+                                  confirmText: 'Drop Booking',
+                                  cancelText: 'Keep Booking',
+                                  isDanger: true,
+                                  onConfirm: async () => {
+                                    try {
+                                      await bookingsAPI.delete(b.id);
+                                      addToast('Booking dismissed.', 'success');
+                                      fetchDashboardModels(user.role);
+                                    } catch (err: any) {
+                                      addToast(err.message, 'error');
+                                    }
+                                  }
+                                });
                               }}
                               className="text-slate-400 hover:text-rose-400 p-2 hover:bg-slate-900 rounded-full transition-all shrink-0 cursor-pointer"
                               title="Force Clear reservation slot"
@@ -1866,6 +1971,7 @@ export default function App() {
                     activeTab="drive"
                     isIframe={isIframe}
                     onLink={linkGoogleWorkspaceAccount}
+                    onBypass={bypassGoogleWorkspaceAuthSimulated}
                   />
                 ) : (
                   <DriveWidget receiptLogs={sessionReceipts} />
@@ -1878,6 +1984,7 @@ export default function App() {
                     activeTab="gmail"
                     isIframe={isIframe}
                     onLink={linkGoogleWorkspaceAccount}
+                    onBypass={bypassGoogleWorkspaceAuthSimulated}
                   />
                 ) : (
                   <GmailWidget 
@@ -1894,6 +2001,7 @@ export default function App() {
                     activeTab="chat"
                     isIframe={isIframe}
                     onLink={linkGoogleWorkspaceAccount}
+                    onBypass={bypassGoogleWorkspaceAuthSimulated}
                   />
                 ) : (
                   <ChatWidget 
@@ -1909,6 +2017,7 @@ export default function App() {
                     activeTab="forms"
                     isIframe={isIframe}
                     onLink={linkGoogleWorkspaceAccount}
+                    onBypass={bypassGoogleWorkspaceAuthSimulated}
                   />
                 ) : (
                   <FormsWidget />
@@ -2308,6 +2417,58 @@ export default function App() {
           <span>Smart Room reservation panel • connected to cloud postgres nodes</span>
         </div>
       </footer>
+
+      {/* Resilient Custom Confirmation Modal (Bypasses sandboxed iframe window.confirm blocks completely) */}
+      <AnimatePresence>
+        {confirmModal && confirmModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 16 }}
+              className="bg-slate-900 border border-slate-800 p-6 rounded-3xl w-full max-w-md shadow-2xl relative z-10 space-y-5 text-left border-indigo-500/10"
+            >
+              <div className="space-y-2">
+                <h3 className="text-base font-bold text-white flex items-center gap-2 font-sans">
+                  <AlertTriangle className={`w-5 h-5 ${confirmModal.isDanger ? 'text-rose-500' : 'text-indigo-400'}`} />
+                  {confirmModal.title}
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-sans">
+                  {confirmModal.message}
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                  className="px-4 py-2 bg-slate-950 hover:bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold hover:text-white text-slate-400 transition-all cursor-pointer select-none"
+                >
+                  {confirmModal.cancelText || 'Cancel'}
+                </button>
+                <button
+                  onClick={() => {
+                    setConfirmModal({ ...confirmModal, isOpen: false });
+                    confirmModal.onConfirm();
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer select-none text-white shadow-lg ${
+                    confirmModal.isDanger 
+                      ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-900/10' 
+                      : 'bg-indigo-600 hover:bg-indigo-550 shadow-indigo-900/10'
+                  }`}
+                >
+                  {confirmModal.confirmText || 'Confirm'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
