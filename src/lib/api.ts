@@ -154,20 +154,45 @@ export const authAPI = {
 
 export const roomsAPI = {
   async list() {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('rooms')
-        .select('*')
-        .order('capacity', { ascending: false });
-      
-      if (error) {
-        throw reportSupabaseError(error, 'Fetch Rooms');
+    try {
+      let data;
+      if (isSupabaseConfigured && supabase) {
+        const { data: sData, error } = await supabase
+          .from('rooms')
+          .select('*')
+          .order('capacity', { ascending: false });
+        
+        if (error) {
+          throw reportSupabaseError(error, 'Fetch Rooms');
+        }
+        data = sData;
+      } else {
+        data = await request('/api/rooms');
       }
+      localStorage.setItem('iitbhu_cached_rooms_v2', JSON.stringify({
+        timestamp: Date.now(),
+        data
+      }));
+      window.dispatchEvent(new CustomEvent('iitbhu_sync_status', { 
+        detail: { type: 'rooms', source: 'network', timestamp: Date.now() } 
+      }));
       return data;
+    } catch (err) {
+      console.warn("Network offline or fetch error for rooms directory, invoking local cache", err);
+      const cached = localStorage.getItem('iitbhu_cached_rooms_v2');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          window.dispatchEvent(new CustomEvent('iitbhu_sync_status', { 
+            detail: { type: 'rooms', source: 'cache', timestamp: parsed.timestamp } 
+          }));
+          return parsed.data;
+        } catch (e) {
+          // ignore parsing error
+        }
+      }
+      throw err;
     }
-
-    // Fallback:
-    return request('/api/rooms');
   },
 
   async create(room: any) {
@@ -235,20 +260,45 @@ export const roomsAPI = {
 
 export const bookingsAPI = {
   async list() {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('*')
-        .order('start_time', { ascending: true });
-      
-      if (error) {
-        throw reportSupabaseError(error, 'Fetch Bookings');
+    try {
+      let data;
+      if (isSupabaseConfigured && supabase) {
+        const { data: sData, error } = await supabase
+          .from('bookings')
+          .select('*')
+          .order('start_time', { ascending: true });
+        
+        if (error) {
+          throw reportSupabaseError(error, 'Fetch Bookings');
+        }
+        data = sData;
+      } else {
+        data = await request('/api/bookings');
       }
+      localStorage.setItem('iitbhu_cached_bookings_v2', JSON.stringify({
+        timestamp: Date.now(),
+        data
+      }));
+      window.dispatchEvent(new CustomEvent('iitbhu_sync_status', { 
+        detail: { type: 'bookings', source: 'network', timestamp: Date.now() } 
+      }));
       return data;
+    } catch (err) {
+      console.warn("Network offline or fetch error for bookings list, invoking local cache", err);
+      const cached = localStorage.getItem('iitbhu_cached_bookings_v2');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          window.dispatchEvent(new CustomEvent('iitbhu_sync_status', { 
+            detail: { type: 'bookings', source: 'cache', timestamp: parsed.timestamp } 
+          }));
+          return parsed.data;
+        } catch (e) {
+          // ignore parsing error
+        }
+      }
+      throw err;
     }
-
-    // Fallback:
-    return request('/api/bookings');
   },
 
   async create(payload: any) {

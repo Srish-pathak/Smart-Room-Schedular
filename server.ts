@@ -202,6 +202,41 @@ async function pushNotification(title: string, message: string, type: 'info' | '
 }
 
 // Helpers for database routing integration
+// Atomic Room Locking Engine to serialize booking attempts and completely eliminate race conditions
+class RoomMutex {
+  private queue: (() => void)[] = [];
+  private locked = false;
+
+  async acquire(): Promise<() => void> {
+    return new Promise<() => void>((resolve) => {
+      const release = () => {
+        if (this.queue.length > 0) {
+          const next = this.queue.shift();
+          next?.();
+        } else {
+          this.locked = false;
+        }
+      };
+
+      if (this.locked) {
+        this.queue.push(() => resolve(release));
+      } else {
+        this.locked = true;
+        resolve(release);
+      }
+    });
+  }
+}
+
+const roomLocks: Record<string, RoomMutex> = {};
+
+function getRoomLock(roomId: string): RoomMutex {
+  if (!roomLocks[roomId]) {
+    roomLocks[roomId] = new RoomMutex();
+  }
+  return roomLocks[roomId];
+}
+
 async function getRooms() {
   if (supabase) {
     const { data, error } = await supabase.from('rooms').select('*');
@@ -486,6 +521,10 @@ app.post('/api/bookings', authenticateToken, requireFacultyOrAdmin, async (req, 
     return res.status(400).json({ error: 'Room ID, room name, start, end, and summary are required' });
   }
 
+  // Acquire atomic lock for this specific room to enforce sequential reservation checking and avoid race condition double-bookings
+  const lock = getRoomLock(roomId);
+  const release = await lock.acquire();
+
   try {
     const bookingsList = await getBookings();
     const roomsList = await getRooms();
@@ -567,6 +606,9 @@ app.post('/api/bookings', authenticateToken, requireFacultyOrAdmin, async (req, 
     res.status(201).json(saved);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  } finally {
+    // Release atomic mutex lock to allow any waiting queued operations to safely evaluate sequential validity
+    release();
   }
 });
 

@@ -122,39 +122,109 @@ export default function CalendarWidget({
     }
   }, [rooms, events, selectedRoom, selectedRoomId, date, startTime, endTime, conflicts]);
 
-  // Find next optimal slot on the same day when this room is completely free
+  // Find next optimal slot on the same day when this room is completely free without nested conflicts
   const suggestedTimeCorrection = useMemo(() => {
     if (conflicts.length === 0) return null;
     try {
-      let maxEnd = new Date(`${date}T${endTime}:00`);
-      conflicts.forEach((e) => {
-        const eend = new Date(e.end?.dateTime || e.end?.date || '');
-        if (!isNaN(eend.getTime()) && eend > maxEnd) {
-          maxEnd = eend;
-        }
-      });
-
       const startMs = new Date(`${date}T${startTime}:00`).getTime();
       const endMs = new Date(`${date}T${endTime}:00`).getTime();
       const durationMs = endMs - startMs;
       const finalDuration = durationMs > 0 ? durationMs : 3600000;
 
-      const newStart = maxEnd;
-      const newEnd = new Date(newStart.getTime() + finalDuration);
+      const dayStart = new Date(`${date}T07:00:00`);
+      const dayEnd = new Date(`${date}T21:00:00`);
 
-      const pad = (num: number) => String(num).padStart(2, '0');
-      const startStr = `${pad(newStart.getHours())}:${pad(newStart.getMinutes())}`;
-      const endStr = `${pad(newEnd.getHours())}:${pad(newEnd.getMinutes())}`;
+      let scanStart = dayStart;
+      const now = new Date();
+      // If date is today, don't propose past slots
+      if (date === now.toISOString().split('T')[0]) {
+        const currentMs = now.getTime();
+        const min15 = 15 * 60 * 1000;
+        const roundedCurrent = new Date(Math.ceil(currentMs / min15) * min15);
+        if (roundedCurrent > scanStart) {
+          scanStart = roundedCurrent;
+        }
+      }
 
-      return {
-        start: startStr,
-        end: endStr,
-        readable: `${startStr} - ${endStr}`,
-      };
+      const endLimit = new Date(dayEnd.getTime() - finalDuration);
+
+      // Filter events belonging to selected room
+      const roomEvents = events.filter((e) => {
+        const loc = (e.location || '').toLowerCase();
+        if (!selectedRoomName || !loc.includes(selectedRoomName.toLowerCase())) return false;
+        const sDate = e.start?.dateTime || e.start?.date;
+        if (!sDate) return false;
+        return new Date(sDate).toISOString().split('T')[0] === date;
+      });
+
+      // Scan in 15-minute increments
+      let candidate = new Date(scanStart.getTime());
+      let foundSlot = null;
+
+      while (candidate <= endLimit) {
+        const condStart = candidate.getTime();
+        const condEnd = condStart + finalDuration;
+
+        const hasOverlap = roomEvents.some((e) => {
+          const eStart = new Date(e.start?.dateTime || e.start?.date || '').getTime();
+          const eEnd = new Date(e.end?.dateTime || e.end?.date || '').getTime();
+          if (isNaN(eStart) || isNaN(eEnd)) return false;
+
+          return condStart < eEnd && condEnd > eStart;
+        });
+
+        if (!hasOverlap) {
+          foundSlot = new Date(condStart);
+          break;
+        }
+
+        candidate = new Date(candidate.getTime() + 15 * 60 * 1000);
+      }
+
+      if (foundSlot) {
+        const foundEnd = new Date(foundSlot.getTime() + finalDuration);
+
+        const pad = (num: number) => String(num).padStart(2, '0');
+        const startStr = `${pad(foundSlot.getHours())}:${pad(foundSlot.getMinutes())}`;
+        const endStr = `${pad(foundEnd.getHours())}:${pad(foundEnd.getMinutes())}`;
+
+        return {
+          start: startStr,
+          end: endStr,
+          readable: `${startStr} – ${endStr}`,
+        };
+      }
+      return null;
     } catch {
       return null;
     }
-  }, [conflicts, date, startTime, endTime]);
+  }, [conflicts, date, startTime, endTime, events, selectedRoomName]);
+
+  // Compute adjacent buffer warnings (within 15 minutes buffer window) to identify high-density back-to-back slot congestion
+  const bufferWarnings = useMemo(() => {
+    if (!selectedRoomName || conflicts.length > 0) return [];
+    try {
+      const selectedStart = new Date(`${date}T${startTime}:00`);
+      const selectedEnd = new Date(`${date}T${endTime}:00`);
+      if (isNaN(selectedStart.getTime()) || isNaN(selectedEnd.getTime())) return [];
+
+      return events.filter((e) => {
+        const loc = e.location || '';
+        if (!loc.toLowerCase().includes(selectedRoomName.toLowerCase())) return false;
+
+        const estart = new Date(e.start?.dateTime || e.start?.date || '');
+        const eend = new Date(e.end?.dateTime || e.end?.date || '');
+        if (isNaN(estart.getTime()) || isNaN(eend.getTime())) return false;
+
+        const disBefore = selectedStart.getTime() - eend.getTime();
+        const disAfter = estart.getTime() - selectedEnd.getTime();
+
+        return (disBefore >= 0 && disBefore < 900000) || (disAfter >= 0 && disAfter < 900000);
+      });
+    } catch {
+      return [];
+    }
+  }, [events, selectedRoomName, date, startTime, endTime, conflicts]);
 
   // Compute database and calendar events for the selected room on the selected date for visual timeline layout
   const dailyOccupancy = useMemo(() => {
@@ -579,10 +649,12 @@ export default function CalendarWidget({
                   <span className={`text-[10px] font-bold uppercase py-0.5 px-2 rounded-md font-mono flex items-center gap-1 border ${
                     conflicts.length > 0 
                       ? 'bg-rose-950/80 text-rose-300 border-rose-800/40' 
+                      : bufferWarnings.length > 0
+                      ? 'bg-amber-950/80 text-amber-300 border-amber-800/40'
                       : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/40'
                   }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${conflicts.length > 0 ? 'bg-rose-400 animate-pulse' : 'bg-emerald-400'}`} />
-                    {conflicts.length > 0 ? 'BUSY' : 'AVAILABLE'}
+                    <span className={`w-1.5 h-1.5 rounded-full ${conflicts.length > 0 ? 'bg-rose-400 animate-pulse' : bufferWarnings.length > 0 ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+                    {conflicts.length > 0 ? 'OVERLAP CONFLICT' : bufferWarnings.length > 0 ? 'TIGHT SCHEDULE' : 'SAFE & AVAILABLE'}
                   </span>
                 </div>
                 <select
@@ -756,6 +828,8 @@ export default function CalendarWidget({
                       className={`absolute top-1.5 h-7 rounded-md flex items-center justify-center transition-all z-20 ${
                         conflicts.length > 0
                           ? 'bg-rose-500/25 border-2 border-rose-500 shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse'
+                          : bufferWarnings.length > 0
+                          ? 'bg-amber-500/20 border-2 border-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.25)] ring-1 ring-amber-450/45'
                           : 'bg-emerald-500/20 border-2 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
                       }`}
                       style={{
@@ -764,9 +838,13 @@ export default function CalendarWidget({
                       }}
                     >
                       <span className={`text-[8px] font-mono font-black tracking-wider px-1 text-center scale-90 ${
-                        conflicts.length > 0 ? 'text-rose-450 text-shadow-sm animate-pulse' : 'text-emerald-450'
+                        conflicts.length > 0 
+                          ? 'text-rose-450 text-shadow-sm animate-pulse' 
+                          : bufferWarnings.length > 0
+                          ? 'text-amber-450' 
+                          : 'text-emerald-450'
                       }`}>
-                        {conflicts.length > 0 ? 'OVERLAP ALERT' : 'YOUR SELECTION'}
+                        {conflicts.length > 0 ? 'OVERLAP ALERT' : bufferWarnings.length > 0 ? 'TIGHT TRANSITION' : 'YOUR SELECTION'}
                       </span>
                     </div>
                   )}
@@ -777,25 +855,71 @@ export default function CalendarWidget({
                   <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1">
                       <span className="w-2.5 h-1.5 rounded-sm bg-slate-800 border border-slate-750" />
-                      Occupied Hours
+                      Occupied
                     </span>
                     <span className="flex items-center gap-1">
                       <span className="w-2.5 h-1.5 rounded-sm bg-emerald-500/20 border border-emerald-500" />
-                      Proposed Slot
+                      Free Selection
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-1.5 rounded-sm bg-amber-500/20 border border-amber-500" />
+                      Tight Buffer (&lt;15 min)
                     </span>
                     <span className="flex items-center gap-1">
                       <span className="w-2.5 h-1.5 rounded-sm bg-rose-500/25 border border-rose-500" />
-                      Overlap Warning
+                      Overlap Alert
                     </span>
                   </div>
-                  {conflicts.length > 0 && (
+                  {conflicts.length > 0 ? (
                     <span className="text-rose-400 font-bold flex items-center gap-1 select-none animate-bounce">
                       <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
                       BOOKING OVERLAPS INSTANTLY
                     </span>
+                  ) : bufferWarnings.length > 0 ? (
+                    <span className="text-amber-400 font-bold flex items-center gap-1 select-none animate-pulse">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      TIGHT TRANSITION CAUTION
+                    </span>
+                  ) : (
+                    <span className="text-emerald-400 font-bold flex items-center gap-1 select-none">
+                      ✓ CLEAR SLOT AVAILABLE
+                    </span>
                   )}
                 </div>
               </div>
+
+              {/* Tight Buffer Advice Section */}
+              {bufferWarnings.length > 0 && conflicts.length === 0 && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="p-4 bg-amber-950/20 border border-amber-900/30 rounded-xl space-y-2"
+                >
+                  <div className="flex items-start gap-2.5 text-xs">
+                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                    <div className="space-y-1 text-left">
+                      <span className="font-bold text-amber-300 block">⚠️ Adjacent Scheduling Congestion Advice</span>
+                      <span className="text-[11px] text-slate-350 block font-sans">
+                        Your selection borders within a 15-minute window of another scheduled event. Ensure there is enough handover/setup time:
+                      </span>
+                      <ul className="list-disc list-inside text-[10.5px] text-slate-400 space-y-0.5 pl-1 font-sans">
+                        {bufferWarnings.map((e, idx) => {
+                          const cStart = e.start?.dateTime ? new Date(e.start.dateTime) : null;
+                          const cEnd = e.end?.dateTime ? new Date(e.end.dateTime) : null;
+                          const timeStr = cStart && cEnd
+                            ? `${cStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${cEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                            : 'All Day';
+                          return (
+                            <li key={idx}>
+                              <span className="text-slate-300 font-semibold">"{e.summary}"</span> is scheduled for {timeStr}.
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
 
               {/* Conflict Status Warning & Smart Resolvers Section */}
               {(conflicts.length > 0 || serverConflict) && (

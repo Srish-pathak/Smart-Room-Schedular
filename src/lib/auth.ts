@@ -88,7 +88,21 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     sessionStorage.setItem('google_workspace_access_token', cachedAccessToken);
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
-    console.error('Sign in error:', error);
+    const isStandardSandboxBlock = 
+      error.code === 'auth/popup-blocked' || 
+      error.code === 'auth/cancelled-popup-request' || 
+      error.code === 'auth/popup-closed-by-user' ||
+      (error.message && (
+        error.message.toLowerCase().includes('timeout') || 
+        error.message.toLowerCase().includes('timed out') ||
+        error.message.toLowerCase().includes('popup')
+      ));
+
+    if (isStandardSandboxBlock) {
+      console.warn('Sandbox Sign in Notice:', error.message || error);
+    } else {
+      console.warn('Sign in unexpected error:', error);
+    }
     if (error.code === 'auth/cancelled-popup-request') {
       throw new Error('The login popup was closed or cancelled. To bypass Google AI Studio iframe sandbox rules, please open the app in a new tab.');
     } else if (error.code === 'auth/popup-closed-by-user') {
