@@ -179,7 +179,7 @@ export default function DriveWidget({ receiptLogs, addToast }: DriveWidgetProps)
   };
 
   return (
-    <div id="drive_integration_panel" className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl text-white">
+    <div id="drive_integration_panel" className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl text-slate-100">
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <HardDrive className="w-5 h-5 text-teal-400" />

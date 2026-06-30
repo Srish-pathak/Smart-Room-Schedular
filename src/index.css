@@ -45,6 +45,49 @@
   --text-main: #031c14;
 }
 
+html.dark {
+  /* Dark Mode Overrides to support Forest Green / Gold theme elegantly */
+  --slate-50: #ffffff;      /* Bright white for high-contrast dark headings */
+  --slate-100: #f6ebd4;     /* Light cream for general headings */
+  --slate-200: #ead29c;     /* Soft gold for subheadings & main text */
+  --slate-300: #dfb965;     /* Premium gold for secondary text */
+  --slate-400: #a5bcae;     /* Pale green-gray for descriptions & inactive text */
+  --slate-500: #dfb965;     /* Gold highlight color */
+  --slate-600: #c09728;     /* Deep gold accent */
+  --slate-700: #01120d;     /* Dark green backdrop */
+  --slate-750: #0d382d;     /* Muted dark green border separator */
+  --slate-800: #04241c;     /* Muted dark green panels */
+  --slate-850: #031c15;     /* Darker cream/green track */
+  --slate-900: #021a14;     /* Deep rich green-black card canvas (instead of pure white) */
+  --slate-950: #01100b;     /* Main background: very deep dark forest green-black (instead of warm cream) */
+
+  --indigo-50: #01120d;     /* Muted dark forest green shadow background */
+  --indigo-100: #032e22;    /* Darkest green background card track */
+  --indigo-200: #0a4735;    /* IIT BHU Forest Green (medium) */
+  --indigo-300: #ead29c;    /* Soft gold */
+  --indigo-400: #dfb965;    /* Premium gold */
+  --indigo-500: #d4af37;    /* IIT BHU Gold accent */
+  --indigo-600: #dfb965;    /* Invert forest green/gold for buttons */
+  --indigo-700: #f6ebd4;    /* Light text */
+  --indigo-800: #ffffff;
+  --indigo-900: #ffffff;
+  --indigo-950: #ffffff;
+
+  --violet-50: #01120d;
+  --violet-100: #021a14;
+  --violet-200: #0d382d;
+  --violet-300: #dfb965;
+  --violet-400: #ead29c;
+  --violet-500: #d4af37;
+  --violet-600: #f6ebd4;
+  --violet-700: #ffffff;
+  --violet-800: #ffffff;
+  --violet-900: #ffffff;
+  --violet-950: #ffffff;
+
+  --text-main: #f6ebd4;
+}
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Space Grotesk", sans-serif;

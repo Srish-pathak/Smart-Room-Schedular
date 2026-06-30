@@ -228,7 +228,7 @@ export function FloorPlanView({
             <MapPin className="w-4 h-4 text-emerald-400 animate-bounce" />
             <span className="text-xs font-extrabold font-mono text-emerald-400 uppercase tracking-widest">IIT BHU Campus - Core Technology Complex</span>
           </div>
-          <h3 className="text-md font-black text-white mt-1">Ground Floor Plan & Utilization Blueprint</h3>
+          <h3 className="text-md font-black text-slate-100 mt-1">Ground Floor Plan & Utilization Blueprint</h3>
           <p className="text-[11px] text-slate-400 mt-1">
             Tap highlighted rooms to inspect features, explore schedules, or secure instant reservations. Glowing green rings show available spaces.
           </p>

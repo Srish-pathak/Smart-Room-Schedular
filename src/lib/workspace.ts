@@ -1,4 +1,4 @@
-import { getAccessToken } from './auth';
+import { getAccessToken, clearAccessToken } from './auth';
 import { Booking, DriveFile, ChatSpace } from '../types';
 
 /**
@@ -98,7 +98,7 @@ async function googleFetch(url: string, options: RequestInit = {}) {
     }
     const isAuthError = response.status === 401 || response.status === 403 || errText.toLowerCase().includes('invalid credential') || errText.toLowerCase().includes('authentication') || errText.toLowerCase().includes('invalid_grant');
     if (isAuthError) {
-      sessionStorage.removeItem('google_workspace_access_token');
+      clearAccessToken();
       window.dispatchEvent(new CustomEvent('google-token-invalid', { detail: { status: response.status, message: errText } }));
     }
     throw new Error(
@@ -229,7 +229,7 @@ export const DriveAPI = {
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        sessionStorage.removeItem('google_workspace_access_token');
+        clearAccessToken();
         window.dispatchEvent(new CustomEvent('google-token-invalid'));
       }
       throw new Error(`Failed to upload content for file ${fileId}`);

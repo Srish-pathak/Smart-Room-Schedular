@@ -99,7 +99,7 @@ export default function OccupancyChart({ sessionReceipts }: OccupancyChartProps)
   };
 
   return (
-    <div id="recharts_occupancy_analytics" className="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 shadow-xl text-white">
+    <div id="recharts_occupancy_analytics" className="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 shadow-xl text-slate-100">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-6 border-b border-slate-800 gap-4">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-5 h-5 text-indigo-400" />

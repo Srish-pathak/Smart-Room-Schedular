@@ -123,14 +123,15 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  if (!cachedAccessToken) {
-    cachedAccessToken = sessionStorage.getItem('google_workspace_access_token');
-  }
-  return cachedAccessToken;
+  return sessionStorage.getItem('google_workspace_access_token');
+};
+
+export const clearAccessToken = () => {
+  cachedAccessToken = null;
+  sessionStorage.removeItem('google_workspace_access_token');
 };
 
 export const logout = async () => {
   await auth.signOut();
-  cachedAccessToken = null;
-  sessionStorage.removeItem('google_workspace_access_token');
+  clearAccessToken();
 };

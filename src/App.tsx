@@ -380,6 +380,15 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Sync dark mode style on document element
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
+
   // Sync state with local storage tokens on load
   useEffect(() => {
     async function checkSession() {
@@ -1181,7 +1190,20 @@ export default function App() {
           className="absolute bottom-1/4 right-1/4 w-[450px] h-[450px] bg-indigo-500/10 rounded-full blur-[140px] pointer-events-none" 
         />
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4 w-full max-w-xl mx-auto pt-2 z-10 relative">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full max-w-xl mx-auto pt-2 z-10 relative">
+          <button
+            onClick={toggleDarkMode}
+            className={`self-start sm:self-auto px-3.5 py-1.5 rounded-xl border text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+              isDarkMode 
+                ? 'border-slate-800 bg-slate-900/80 text-[#dfb965] hover:bg-slate-800' 
+                : 'border-slate-200 bg-white/80 text-[#0a4735] hover:bg-stone-50'
+            }`}
+            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+            <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+          </button>
+
           <div className={`self-end sm:self-auto text-right font-mono text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} flex items-center gap-2`}>
             <Clock3 className="w-3.5 h-3.5 text-indigo-505" />
             <span>BHU Office Clock: {currentTime || 'Loading...'}</span>
@@ -1262,7 +1284,7 @@ export default function App() {
               className={`flex-1 text-center py-2.5 text-xs font-bold uppercase transition-all cursor-pointer ${
                 !isRegisterMode 
                   ? 'text-indigo-500 border-b-2 border-indigo-500' 
-                  : (isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-650')
+                  : (isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-500')
               }`}
             >
               Credentials Sign In
@@ -1272,7 +1294,7 @@ export default function App() {
               className={`flex-1 text-center py-2.5 text-xs font-bold uppercase transition-all cursor-pointer ${
                 isRegisterMode 
                   ? 'text-indigo-500 border-b-2 border-indigo-500' 
-                  : (isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-650')
+                  : (isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-500')
               }`}
             >
               Create Account
@@ -1329,7 +1351,7 @@ export default function App() {
                 className="space-y-4"
               >
                 <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>
                     Email Coordinates (Any email works to instantly connect!)
                   </label>
                   <input
@@ -1346,7 +1368,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>
                     Account Secret Password (Optional - any password works!)
                   </label>
                   <input
@@ -1379,7 +1401,7 @@ export default function App() {
                 className="space-y-4"
               >
                 <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>Your Full Name</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>Your Full Name</label>
                   <input
                     type="text"
                     required
@@ -1394,7 +1416,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>IIT Email Address</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>IIT Email Address</label>
                   <input
                     type="email"
                     required
@@ -1409,7 +1431,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>Create Password</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>Create Password</label>
                   <input
                     type="password"
                     required
@@ -1424,7 +1446,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>Desired Status Role</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>Desired Status Role</label>
                   <select
                     value={registerRole}
                     onChange={(e: any) => setRegisterRole(e.target.value)}
@@ -1593,7 +1615,7 @@ export default function App() {
                   className={`relative p-2.5 rounded-xl border transition-all cursor-pointer ${
                     safeNotifications.some((n) => !n.read)
                       ? 'bg-[#faf8f2] border-[#dfb965] text-[#c09728]'
-                      : (isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white' : 'bg-[#faf8f2] border-[#ead29c]/40 text-slate-450 hover:text-[#0a4735]')
+                      : (isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white' : 'bg-[#faf8f2] border-[#ead29c]/40 text-slate-500 hover:text-[#0a4735]')
                   }`}
                 >
                   <Bell className="w-4 h-4" />
@@ -1790,7 +1812,7 @@ export default function App() {
                   </div>
                   <div className="text-left leading-tight flex-1 font-sans">
                     <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user.name}</span>
-                    <span className={`text-[10px] block truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-550'}`}>{user.email}</span>
+                    <span className={`text-[10px] block truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{user.email}</span>
                   </div>
                 </div>
 
@@ -1884,14 +1906,14 @@ export default function App() {
               <span className={`font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                 {isOnline ? 'Network Connected' : 'Offline Cached Directory Active'}
               </span>
-              <span className={isDarkMode ? 'text-slate-650' : 'text-slate-300'}>|</span>
+              <span className={isDarkMode ? 'text-slate-600' : 'text-slate-300'}>|</span>
               <span className={`${isDarkMode ? 'text-slate-400' : 'text-slate-600'} text-[10.5px] font-mono`}>
                 IIT BHU Cloud Sync: {isOnline ? 'Live Mode' : 'Local Sandbox Mode'}
               </span>
             </div>
 
             {/* Sync Times section */}
-            <div className="flex flex-wrap items-center gap-4 text-[10.5px] font-mono text-slate-450 animate-fade-in">
+            <div className="flex flex-wrap items-center gap-4 text-[10.5px] font-mono text-slate-500 animate-fade-in">
               <div className="flex items-center gap-1.5 text-slate-500">
                 <span>Rooms:</span>
                 <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-bold ${
@@ -2794,7 +2816,7 @@ export default function App() {
                                 {room.bestFor && (
                                   <div className="space-y-1 text-xs text-left">
                                     <span className="block text-[9px] font-bold text-[#c09728] uppercase tracking-widest font-mono">Best suited for</span>
-                                    <p className="text-slate-650 leading-relaxed font-serif font-light">{room.bestFor}</p>
+                                    <p className="text-slate-500 leading-relaxed font-serif font-light">{room.bestFor}</p>
                                   </div>
                                 )}
 
@@ -2852,7 +2874,7 @@ export default function App() {
                                         </div>
 
                                         {roomBookings.length === 0 ? (
-                                          <p className="text-[10.5px] text-slate-450 italic pl-1">This space is completely vacant today. Book below!</p>
+                                          <p className="text-[10.5px] text-slate-500 italic pl-1">This space is completely vacant today. Book below!</p>
                                         ) : (
                                           <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 custom-scrollbar">
                                             {roomBookings.map((b) => {
@@ -3459,7 +3481,7 @@ export default function App() {
                                           </span>
                                         ))}
                                         {room.features.length > 3 && (
-                                          <span className="text-[9px] text-slate-550 self-center">
+                                          <span className="text-[9px] text-slate-500 self-center">
                                             +{room.features.length - 3} more
                                           </span>
                                         )}
@@ -3544,7 +3566,7 @@ export default function App() {
                               <span className="text-[10px] text-slate-400 block font-mono">
                                 Date: {new Date(b.start_time).toLocaleDateString()} | {new Date(b.start_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - {new Date(b.end_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
                               </span>
-                              <span className="text-[9px] text-slate-550 block font-mono">Reserved by: {b.creator_name} ({b.creator_email})</span>
+                              <span className="text-[9px] text-slate-500 block font-mono">Reserved by: {b.creator_name} ({b.creator_email})</span>
                             </div>
                             <button
                               onClick={() => {
@@ -3730,7 +3752,7 @@ export default function App() {
               <div className="space-y-1.5">
                 <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest font-mono">QR PLAQUE SENSOR DECODER</span>
                 <h3 className="text-lg font-black text-white">{selectedQRRoom.name}</h3>
-                <p className="text-slate-450 text-[11px]">Hold your mobile device up to the academic doorway QR matrix.</p>
+                <p className="text-slate-400 text-[11px]">Hold your mobile device up to the academic doorway QR matrix.</p>
               </div>
 
               <div className="flex justify-center p-4 bg-white rounded-2xl max-w-[200px] mx-auto border border-slate-250 shadow-inner">
@@ -3795,7 +3817,7 @@ export default function App() {
               <div className="space-y-1">
                 <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest block font-mono">Confirm Space Selection</span>
                 <h3 className="text-lg font-black text-white">{confirmRoomSelection.name}</h3>
-                <p className="text-[11px] text-slate-450 leading-relaxed pt-1.5">
+                <p className="text-[11px] text-slate-400 leading-relaxed pt-1.5">
                   You are selecting this classroom. You will be redirected to the **Calendar Scheduler** tab with this space pre-assigned.
                 </p>
               </div>
@@ -3933,7 +3955,7 @@ export default function App() {
                           value={historySearchQuery}
                           onChange={(e) => setHistorySearchQuery(e.target.value)}
                           placeholder="Filter bookings by user, email, or summary..."
-                          className="w-full bg-slate-950 hover:bg-slate-950/90 focus:bg-slate-950 border border-slate-800 focus:border-indigo-500/80 rounded-xl pl-9.5 pr-8.5 py-2 text-xs text-slate-200 placeholder-slate-550 focus:outline-none transition-all font-sans shadow-inner text-left"
+                          className="w-full bg-slate-950 hover:bg-slate-950/90 focus:bg-slate-950 border border-slate-800 focus:border-indigo-500/80 rounded-xl pl-9.5 pr-8.5 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-all font-sans shadow-inner text-left"
                         />
                         {historySearchQuery && (
                           <button
@@ -4103,7 +4125,11 @@ export default function App() {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-              className="fixed right-0 top-0 bottom-0 w-full sm:max-w-md bg-white border-l border-[#ead29c]/50 shadow-2xl z-50 flex flex-col h-full text-[#0a4735] overflow-hidden text-left"
+              className={`fixed right-0 top-0 bottom-0 w-full sm:max-w-md border-l shadow-2xl z-50 flex flex-col h-full overflow-hidden text-left ${
+                isDarkMode 
+                  ? 'bg-slate-900 border-slate-800 text-slate-100' 
+                  : 'bg-white border-[#ead29c]/50 text-[#0a4735]'
+              }`}
             >
               {/* Cover Image Header */}
               <div className="relative h-56 shrink-0 bg-stone-100">
@@ -4139,8 +4165,8 @@ export default function App() {
                 {/* Live Status indicator banner */}
                 <div className={`p-4 rounded-2xl border flex items-center justify-between shadow-sm ${
                   selectedRoomForDetails.status === 'available' 
-                    ? 'bg-emerald-50/70 border-emerald-200/60 text-emerald-800' 
-                    : 'bg-rose-50/70 border-rose-200/60 text-rose-800'
+                    ? (isDarkMode ? 'bg-emerald-950/40 border-emerald-900/30 text-emerald-400' : 'bg-emerald-50/70 border-emerald-200/60 text-emerald-800')
+                    : (isDarkMode ? 'bg-rose-950/40 border-rose-900/30 text-rose-450' : 'bg-rose-50/70 border-rose-200/60 text-rose-800')
                 }`}>
                   <div className="flex items-center gap-2">
                     <span className={`w-2.5 h-2.5 rounded-full ${
@@ -4150,26 +4176,30 @@ export default function App() {
                       {selectedRoomForDetails.status === 'available' ? 'SPACE IS VACANT' : 'SPACE IS RESERVED'}
                     </span>
                   </div>
-                  <span className="text-[10px] font-mono text-slate-500 font-bold">Real-time status</span>
+                  <span className={`text-[10px] font-mono font-bold ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>Real-time status</span>
                 </div>
 
                 {/* Core Specifications */}
-                <div className="bg-[#faf8f2] border border-[#ead29c]/30 rounded-2xl p-4.5 space-y-3.5">
+                <div className={`border rounded-2xl p-4.5 space-y-3.5 ${
+                  isDarkMode 
+                    ? 'bg-slate-950/60 border-slate-800/80' 
+                    : 'bg-[#faf8f2] border-[#ead29c]/30'
+                }`}>
                   <h4 className="text-[10px] font-extrabold text-[#c09728] uppercase tracking-widest font-mono">
                     Core Specifications
                   </h4>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1 text-left">
                       <span className="text-[10.5px] text-slate-400 block font-semibold uppercase tracking-wider">Seating Capacity</span>
-                      <div className="flex items-center gap-1.5 font-bold text-slate-800 text-sm">
-                        <Users className="w-4 h-4 text-[#0a4735]" />
+                      <div className={`flex items-center gap-1.5 font-bold text-sm ${isDarkMode ? 'text-slate-200' : 'text-slate-850'}`}>
+                        <Users className={`w-4 h-4 ${isDarkMode ? 'text-[#dfb965]' : 'text-[#0a4735]'}`} />
                         <span>{selectedRoomForDetails.capacity} Seats</span>
                       </div>
                     </div>
                     <div className="space-y-1 text-left">
                       <span className="text-[10.5px] text-slate-400 block font-semibold uppercase tracking-wider">Campus Venue</span>
-                      <div className="flex items-center gap-1.5 font-bold text-slate-800 text-sm">
-                        <Building2 className="w-4 h-4 text-[#0a4735]" />
+                      <div className={`flex items-center gap-1.5 font-bold text-sm ${isDarkMode ? 'text-slate-200' : 'text-slate-850'}`}>
+                        <Building2 className={`w-4 h-4 ${isDarkMode ? 'text-[#dfb965]' : 'text-[#0a4735]'}`} />
                         <span className="truncate">{selectedRoomForDetails.building || 'IIT (BHU)'}</span>
                       </div>
                     </div>
@@ -4182,7 +4212,7 @@ export default function App() {
                     <h4 className="text-[10px] font-extrabold text-[#c09728] uppercase tracking-widest font-mono">
                       Academic Suitability
                     </h4>
-                    <p className="text-slate-650 text-xs leading-relaxed font-serif font-light">
+                    <p className={`${isDarkMode ? 'text-slate-300' : 'text-slate-500'} text-xs leading-relaxed font-serif font-light`}>
                       {selectedRoomForDetails.bestFor}
                     </p>
                   </div>
@@ -4197,34 +4227,42 @@ export default function App() {
                     {selectedRoomForDetails.features.map((feature, idx) => {
                       // Dynamic Icon Matching
                       const text = feature.toLowerCase();
-                      let icon = <Compass className="w-4 h-4 text-[#0a4735]" />;
+                      let icon = <Compass className="w-4 h-4" />;
                       let featureDesc = "Fully integrated & certified for academic applications.";
                       
                       if (text.includes('projector') || text.includes('display') || text.includes('screen')) {
-                        icon = <Tv className="w-4 h-4 text-[#0a4735]" />;
+                        icon = <Tv className="w-4 h-4" />;
                         featureDesc = "Ultra-high-definition presentation output.";
                       } else if (text.includes('sound') || text.includes('audio') || text.includes('video') || text.includes('conferencing')) {
-                        icon = <Wifi className="w-4 h-4 text-[#c09728]" />;
+                        icon = <Wifi className="w-4 h-4" />;
                         featureDesc = "Optimized for hybrid lectures & remote participants.";
                       } else if (text.includes('ac') || text.includes('air conditioning') || text.includes('wind')) {
                         icon = <Wind className="w-4 h-4 text-sky-650" />;
                         featureDesc = "Temperature-controlled climate feedback.";
                       } else if (text.includes('whiteboard') || text.includes('glass')) {
-                        icon = <BookOpen className="w-4 h-4 text-[#0a4735]" />;
+                        icon = <BookOpen className="w-4 h-4" />;
                         featureDesc = "Writable surfaces for diagramming.";
                       } else if (text.includes('ergonomic') || text.includes('seating') || text.includes('chairs')) {
-                        icon = <Accessibility className="w-4 h-4 text-[#0a4735]" />;
+                        icon = <Accessibility className="w-4 h-4" />;
                         featureDesc = "Comfortable seating for extended seminars.";
                       }
 
                       return (
-                        <div key={idx} className="flex items-start gap-3 p-3 bg-[#faf8f2]/40 border border-[#ead29c]/20 rounded-xl">
-                          <div className="p-2 bg-white rounded-lg border border-[#ead29c]/45 shrink-0 shadow-sm">
+                        <div key={idx} className={`flex items-start gap-3 p-3 border rounded-xl ${
+                          isDarkMode 
+                            ? 'bg-slate-950/40 border-slate-800/40' 
+                            : 'bg-[#faf8f2]/40 border-[#ead29c]/20'
+                        }`}>
+                          <div className={`p-2 rounded-lg border shrink-0 shadow-sm ${
+                            isDarkMode 
+                              ? 'bg-slate-900 border-slate-800 text-[#dfb965]' 
+                              : 'bg-white border-[#ead29c]/45 text-[#0a4735]'
+                          }`}>
                             {icon}
                           </div>
                           <div className="space-y-0.5 text-left">
-                            <span className="text-xs font-bold text-slate-800 block">{feature}</span>
-                            <span className="text-[10.5px] text-slate-500 block leading-tight">{featureDesc}</span>
+                            <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{feature}</span>
+                            <span className={`text-[10.5px] block leading-tight ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{featureDesc}</span>
                           </div>
                         </div>
                       );
@@ -4234,14 +4272,18 @@ export default function App() {
 
                 {/* Booking contact and department */}
                 {selectedRoomForDetails.contactDepartment && (
-                  <div className="p-4 bg-stone-50 border border-stone-200/65 rounded-2xl text-left space-y-1">
-                    <span className="text-[9px] font-bold text-stone-500 uppercase tracking-widest font-mono">
+                  <div className={`p-4 border rounded-2xl text-left space-y-1 ${
+                    isDarkMode 
+                      ? 'bg-slate-950/60 border-slate-800/80' 
+                      : 'bg-stone-50 border-stone-200/65'
+                  }`}>
+                    <span className={`text-[9px] font-bold uppercase tracking-widest font-mono ${isDarkMode ? 'text-slate-400' : 'text-stone-500'}`}>
                       Administrative Custodian
                     </span>
-                    <div className="text-xs text-slate-700">
-                      Primary contact: <strong className="text-[#0a4735] font-extrabold">{selectedRoomForDetails.contactDepartment}</strong>
+                    <div className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      Primary contact: <strong className={`font-extrabold ${isDarkMode ? 'text-[#dfb965]' : 'text-[#0a4735]'}`}>{selectedRoomForDetails.contactDepartment}</strong>
                     </div>
-                    <p className="text-[10px] text-slate-450">
+                    <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                       Subject to booking criteria of the coordinating department.
                     </p>
                   </div>
@@ -4249,10 +4291,18 @@ export default function App() {
               </div>
 
               {/* Action footer */}
-              <div className="p-6 bg-[#faf8f2]/60 border-t border-[#ead29c]/30 shrink-0 flex items-center gap-3">
+              <div className={`p-6 border-t shrink-0 flex items-center gap-3 ${
+                isDarkMode 
+                  ? 'bg-slate-950 border-slate-850' 
+                  : 'bg-[#faf8f2]/60 border-[#ead29c]/30'
+              }`}>
                 <button
                   onClick={() => setSelectedRoomForDetails(null)}
-                  className="flex-1 py-3 bg-white hover:bg-[#faf8f2] border border-[#ead29c] text-[#0a4735] font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm text-center font-display"
+                  className={`flex-1 py-3 border font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm text-center font-display ${
+                    isDarkMode 
+                      ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850' 
+                      : 'bg-white border-[#ead29c] text-[#0a4735] hover:bg-[#faf8f2]'
+                  }`}
                 >
                   Close Details
                 </button>
@@ -4265,7 +4315,11 @@ export default function App() {
                       setActiveTab('calendar');
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
-                    className="flex-1 py-3 bg-[#0a4735] hover:bg-[#063325] text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md text-center font-display"
+                    className={`flex-1 py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md text-center font-display ${
+                      isDarkMode 
+                        ? 'bg-indigo-600 hover:bg-indigo-500 text-white' 
+                        : 'bg-[#0a4735] hover:bg-[#063325] text-white'
+                    }`}
                   >
                     Reserve Now
                   </button>
@@ -4275,7 +4329,11 @@ export default function App() {
                       setSelectedRoomForHistory(selectedRoomForDetails);
                       setSelectedRoomForDetails(null);
                     }}
-                    className="flex-1 py-3 bg-[#dfb965] hover:bg-[#d4af37] text-[#0a4735] font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md text-center font-display"
+                    className={`flex-1 py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md text-center font-display ${
+                      isDarkMode 
+                        ? 'bg-[#dfb965] hover:bg-[#dfb965]/95 text-slate-950' 
+                        : 'bg-[#dfb965] hover:bg-[#d4af37] text-[#0a4735]'
+                    }`}
                   >
                     View Schedule
                   </button>
