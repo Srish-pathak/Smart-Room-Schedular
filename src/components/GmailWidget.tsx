@@ -7,9 +7,10 @@ interface GmailWidgetProps {
   userEmail: string;
   gmailLog: { to: string; subject: string; body: string; time: string }[];
   setGmailLog: React.Dispatch<React.SetStateAction<{ to: string; subject: string; body: string; time: string }[]>>;
+  addToast?: (message: string, type?: 'success' | 'info' | 'error') => void;
 }
 
-export default function GmailWidget({ userEmail, gmailLog, setGmailLog }: GmailWidgetProps) {
+export default function GmailWidget({ userEmail, gmailLog, setGmailLog, addToast }: GmailWidgetProps) {
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('Smart Room Scheduling Notice');
   const [message, setMessage] = useState('');
@@ -50,10 +51,18 @@ export default function GmailWidget({ userEmail, gmailLog, setGmailLog }: GmailW
         },
         ...prev,
       ]);
-      alert(`Email sent successfully to ${to}!`);
+      if (addToast) {
+        addToast(`Email sent successfully to ${to}!`, 'success');
+      } else {
+        alert(`Email sent successfully to ${to}!`);
+      }
       setMessage('');
     } catch (err: any) {
-      alert(err.message || 'Gmail transmission failed.');
+      if (addToast) {
+        addToast(err.message || 'Gmail transmission failed.', 'error');
+      } else {
+        alert(err.message || 'Gmail transmission failed.');
+      }
     } finally {
       setSending(false);
     }

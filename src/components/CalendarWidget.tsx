@@ -28,7 +28,7 @@ interface CalendarWidgetProps {
 }
 
 export default function CalendarWidget({
-  rooms,
+  rooms = [],
   userEmail,
   userName,
   onRefreshRoomsStatus,
@@ -41,9 +41,28 @@ export default function CalendarWidget({
   const [showBookModal, setShowBookModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverConflict, setServerConflict] = useState<any>(null);
+  const [conflictResolverData, setConflictResolverData] = useState<{
+    requestedRoom: Room;
+    requestedStartTime: string;
+    requestedEndTime: string;
+    requestedDate: string;
+    conflictingEvents: {
+      summary: string;
+      startTime: string;
+      endTime: string;
+      creatorName: string;
+    }[];
+    suggestedTimes: {
+      start: string;
+      end: string;
+      label: string;
+      differenceText: string;
+    }[];
+    alternativeRoomsList: any[];
+  } | null>(null);
 
   // Form states
-  const [selectedRoomId, setSelectedRoomId] = useState(defaultSelectedRoomId || rooms[0]?.id || '');
+  const [selectedRoomId, setSelectedRoomId] = useState(defaultSelectedRoomId || (rooms && rooms[0]?.id) || '');
   const [summary, setSummary] = useState('');
   const [agenda, setAgenda] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -66,7 +85,7 @@ export default function CalendarWidget({
   }, [selectedRoomId, date, startTime, endTime]);
 
   // Selected room resolution
-  const selectedRoom = useMemo(() => rooms.find((r) => r.id === selectedRoomId), [rooms, selectedRoomId]);
+  const selectedRoom = useMemo(() => (rooms || []).find((r) => r.id === selectedRoomId), [rooms, selectedRoomId]);
   const selectedRoomName = selectedRoom ? selectedRoom.name : '';
 
   // Get conflicting events for currently scheduled room/time
@@ -101,7 +120,7 @@ export default function CalendarWidget({
       const selectedEnd = new Date(`${date}T${endTime}:00`);
       if (isNaN(selectedStart.getTime()) || isNaN(selectedEnd.getTime())) return [];
 
-      return rooms.filter((r) => {
+      return (rooms || []).filter((r) => {
         if (r.id === selectedRoomId) return false;
         
         const hasConflicts = events.some((e) => {
@@ -329,9 +348,319 @@ export default function CalendarWidget({
     fetchCalendarEvents();
   }, [rooms]);
 
+  const triggerConflictResolver = (localConflicts: any[]) => {
+    if (!selectedRoom) return;
+
+    const [stH, stM] = startTime.split(':').map(Number);
+    const [etH, etM] = endTime.split(':').map(Number);
+    const proposedDurationMin = (etH * 60 + etM) - (stH * 60 + stM);
+    const durationMs = proposedDurationMin * 60 * 1000;
+
+    const suggestions: { start: string; end: string; label: string; differenceText: string }[] = [];
+
+    const formatHM = (d: Date) => {
+      const h = String(d.getHours()).padStart(2, '0');
+      const m = String(d.getMinutes()).padStart(2, '0');
+      return `${h}:${m}`;
+    };
+
+    const isSlotCandidateFree = (sTime: string, eTime: string) => {
+      if (!selectedRoomName) return false;
+      const sDateStr = `${date}T${sTime}:00`;
+      const eDateStr = `${date}T${eTime}:00`;
+      const reqStart = new Date(sDateStr);
+      const reqEnd = new Date(eDateStr);
+      
+      if (reqStart >= reqEnd) return false;
+
+      const dayStart = new Date(`${date}T07:00:00`);
+      const dayEnd = new Date(`${date}T21:00:00`);
+      if (reqStart < dayStart || reqEnd > dayEnd) return false;
+
+      const now = new Date();
+      if (date === now.toISOString().split('T')[0] && reqStart.getTime() <= now.getTime()) {
+        return false;
+      }
+
+      return !events.some((e) => {
+        const loc = e.location || '';
+        if (!loc.toLowerCase().includes(selectedRoomName.toLowerCase())) return false;
+        const estart = new Date(e.start?.dateTime || e.start?.date || '');
+        const eend = new Date(e.end?.dateTime || e.end?.date || '');
+        if (isNaN(estart.getTime()) || isNaN(eend.getTime())) return false;
+        return reqStart < eend && reqEnd > estart;
+      });
+    };
+
+    const firstConflict = localConflicts[0];
+    const cStart = new Date(firstConflict.start?.dateTime || firstConflict.start?.date || '');
+    const cEnd = new Date(firstConflict.end?.dateTime || firstConflict.end?.date || '');
+
+    if (!isNaN(cStart.getTime()) && !isNaN(cEnd.getTime())) {
+      const earlierStart = new Date(cStart.getTime() - durationMs);
+      const earlierStartStr = formatHM(earlierStart);
+      const earlierEndStr = formatHM(cStart);
+      if (isSlotCandidateFree(earlierStartStr, earlierEndStr)) {
+        suggestions.push({
+          start: earlierStartStr,
+          end: earlierEndStr,
+          label: 'Shift earlier to finish clean before existing meeting starts',
+          differenceText: `Starts ${earlierStartStr} — Ends ${earlierEndStr} (${proposedDurationMin} min duration)`
+        });
+      }
+
+      const laterEnd = new Date(cEnd.getTime() + durationMs);
+      const laterStartStr = formatHM(cEnd);
+      const laterEndStr = formatHM(laterEnd);
+      if (isSlotCandidateFree(laterStartStr, laterEndStr)) {
+        suggestions.push({
+          start: laterStartStr,
+          end: laterEndStr,
+          label: 'Postpone later to start right after the current occupant vacates',
+          differenceText: `Starts ${laterStartStr} — Ends ${laterEndStr} (${proposedDurationMin} min duration)`
+        });
+      }
+    }
+
+    if (suggestedTimeCorrection) {
+      const alreadyAdded = suggestions.some(
+        s => s.start === suggestedTimeCorrection.start && s.end === suggestedTimeCorrection.end
+      );
+      if (!alreadyAdded && isSlotCandidateFree(suggestedTimeCorrection.start, suggestedTimeCorrection.end)) {
+        suggestions.push({
+          start: suggestedTimeCorrection.start,
+          end: suggestedTimeCorrection.end,
+          label: 'Select next fully vacant standard booking window',
+          differenceText: `Starts ${suggestedTimeCorrection.start} — Ends ${suggestedTimeCorrection.end}`
+        });
+      }
+    }
+
+    if (suggestions.length === 0) {
+      const offsets = [-30, 30, -60, 60, -90, 90, -120, 120];
+      for (const offset of offsets) {
+        const baseStart = new Date(`${date}T${startTime}:00`);
+        const offsetStart = new Date(baseStart.getTime() + offset * 60 * 1000);
+        const offsetEnd = new Date(offsetStart.getTime() + durationMs);
+        const sStr = formatHM(offsetStart);
+        const eStr = formatHM(offsetEnd);
+        if (isSlotCandidateFree(sStr, eStr)) {
+          suggestions.push({
+            start: sStr,
+            end: eStr,
+            label: `Shift schedule by ${Math.abs(offset)} minutes ${offset < 0 ? 'earlier' : 'later'}`,
+            differenceText: `Starts ${sStr} — Ends ${eStr}`
+          });
+          if (suggestions.length >= 3) break;
+        }
+      }
+    }
+
+    setConflictResolverData({
+      requestedRoom: selectedRoom,
+      requestedStartTime: startTime,
+      requestedEndTime: endTime,
+      requestedDate: date,
+      conflictingEvents: localConflicts.map(c => ({
+        summary: c.summary,
+        startTime: c.start?.dateTime || c.start?.date,
+        endTime: c.end?.dateTime || c.end?.date,
+        creatorName: c.creator?.displayName || c.creator?.email || 'Student Occupant'
+      })),
+      suggestedTimes: suggestions,
+      alternativeRoomsList: alternativeRooms || []
+    });
+  };
+
+  const triggerServerConflictResolver = (conflict: any) => {
+    if (!selectedRoom) return;
+
+    const [stH, stM] = startTime.split(':').map(Number);
+    const [etH, etM] = endTime.split(':').map(Number);
+    const proposedDurationMin = (etH * 60 + etM) - (stH * 60 + stM);
+    const durationMs = proposedDurationMin * 60 * 1000;
+
+    const suggestions: { start: string; end: string; label: string; differenceText: string }[] = [];
+
+    const formatHM = (d: Date) => {
+      const h = String(d.getHours()).padStart(2, '0');
+      const m = String(d.getMinutes()).padStart(2, '0');
+      return `${h}:${m}`;
+    };
+
+    const isSlotCandidateFree = (sTime: string, eTime: string) => {
+      if (!selectedRoomName) return false;
+      const sDateStr = `${date}T${sTime}:00`;
+      const eDateStr = `${date}T${eTime}:00`;
+      const reqStart = new Date(sDateStr);
+      const reqEnd = new Date(eDateStr);
+      
+      if (reqStart >= reqEnd) return false;
+
+      const dayStart = new Date(`${date}T07:00:00`);
+      const dayEnd = new Date(`${date}T21:00:00`);
+      if (reqStart < dayStart || reqEnd > dayEnd) return false;
+
+      const now = new Date();
+      if (date === now.toISOString().split('T')[0] && reqStart.getTime() <= now.getTime()) {
+        return false;
+      }
+
+      return !events.some((e) => {
+        const loc = e.location || '';
+        if (!loc.toLowerCase().includes(selectedRoomName.toLowerCase())) return false;
+        const estart = new Date(e.start?.dateTime || e.start?.date || '');
+        const eend = new Date(e.end?.dateTime || e.end?.date || '');
+        if (isNaN(estart.getTime()) || isNaN(eend.getTime())) return false;
+        return reqStart < eend && reqEnd > estart;
+      });
+    };
+
+    const cOB = conflict.overlappingBooking;
+    if (cOB) {
+      const cStart = new Date(cOB.startTime);
+      const cEnd = new Date(cOB.endTime);
+
+      if (!isNaN(cStart.getTime()) && !isNaN(cEnd.getTime())) {
+        const earlierStart = new Date(cStart.getTime() - durationMs);
+        const earlierStartStr = formatHM(earlierStart);
+        const earlierEndStr = formatHM(cStart);
+        if (isSlotCandidateFree(earlierStartStr, earlierEndStr)) {
+          suggestions.push({
+            start: earlierStartStr,
+            end: earlierEndStr,
+            label: 'Shift earlier to finish solid before conflict starts',
+            differenceText: `Starts ${earlierStartStr} — Ends ${earlierEndStr} (${proposedDurationMin} min duration)`
+          });
+        }
+
+        const laterEnd = new Date(cEnd.getTime() + durationMs);
+        const laterStartStr = formatHM(cEnd);
+        const laterEndStr = formatHM(laterEnd);
+        if (isSlotCandidateFree(laterStartStr, laterEndStr)) {
+          suggestions.push({
+            start: laterStartStr,
+            end: laterEndStr,
+            label: 'Postpone later to start right after the conflict clears',
+            differenceText: `Starts ${laterStartStr} — Ends ${laterEndStr} (${proposedDurationMin} min duration)`
+          });
+        }
+      }
+    }
+
+    if (conflict.advisorVacancyTime) {
+      const vacantDate = new Date(conflict.advisorVacancyTime);
+      const vacantEnd = new Date(vacantDate.getTime() + durationMs);
+      const sStr = formatHM(vacantDate);
+      const eStr = formatHM(vacantEnd);
+      if (isSlotCandidateFree(sStr, eStr)) {
+        suggestions.push({
+          start: sStr,
+          end: eStr,
+          label: 'Default optimal vacancy window recommendation',
+          differenceText: `Starts ${sStr} — Ends ${eStr}`
+        });
+      }
+    }
+
+    setConflictResolverData({
+      requestedRoom: selectedRoom,
+      requestedStartTime: startTime,
+      requestedEndTime: endTime,
+      requestedDate: date,
+      conflictingEvents: [{
+        summary: cOB?.summary || 'Existing Reservation',
+        startTime: cOB?.startTime,
+        endTime: cOB?.endTime,
+        creatorName: cOB?.creatorName || 'Student Occupant'
+      }],
+      suggestedTimes: suggestions,
+      alternativeRoomsList: (conflict.sisterRooms || []).map((sr: any) => {
+        return (rooms || []).find(r => r.id === sr.id) || { id: sr.id, name: sr.name, capacity: sr.capacity, features: [], status: 'available' };
+      })
+    });
+  };
+
+  const applySuggestionAndBook = async (suggestedTime?: { start: string, end: string }, suggestedRoomId?: string) => {
+    setIsSubmitting(true);
+    let targetStart = startTime;
+    let targetEnd = endTime;
+    let targetRoomId = selectedRoomId;
+    let targetRoomName = selectedRoomName;
+
+    if (suggestedTime) {
+      targetStart = suggestedTime.start;
+      targetEnd = suggestedTime.end;
+      setStartTime(suggestedTime.start);
+      setEndTime(suggestedTime.end);
+    }
+    
+    if (suggestedRoomId) {
+      targetRoomId = suggestedRoomId;
+      const rDetail = (rooms || []).find(r => r.id === suggestedRoomId);
+      if (rDetail) {
+        targetRoomName = rDetail.name;
+        setSelectedRoomId(suggestedRoomId);
+      }
+    }
+
+    const startDateTime = new Date(`${date}T${targetStart}:00`).toISOString();
+    const endDateTime = new Date(`${date}T${targetEnd}:00`).toISOString();
+
+    try {
+      await bookingsAPI.create({
+        roomId: targetRoomId,
+        roomName: targetRoomName,
+        summary,
+        agenda,
+        startTime: startDateTime,
+        endTime: endDateTime,
+        attendeeEmail: attendeeEmail || undefined,
+        facultyId: facultyId || undefined,
+        bypassConflict: true
+      });
+
+      const hasGoogleToken = !!sessionStorage.getItem('google_workspace_access_token');
+      if (hasGoogleToken) {
+        try {
+          await CalendarAPI.createEvent({
+            roomName: targetRoomName,
+            summary,
+            startTime: startDateTime,
+            endTime: endDateTime,
+            creatorName: userName,
+            creatorEmail: userEmail,
+            facultyId: facultyId || undefined,
+            attendeeEmail: attendeeEmail || undefined,
+          });
+        } catch (gErr) {
+          console.warn('Google Workspace sync skipped:', gErr);
+        }
+      }
+
+      setConflictResolverData(null);
+      setShowBookModal(false);
+      setSummary('');
+      setAgenda('');
+      setFacultyId('');
+      setAttendeeEmail('');
+      onBookingAdded(targetRoomName, summary, startDateTime, endDateTime, agenda || '');
+      await fetchCalendarEvents();
+    } catch (err: any) {
+      alert(`Conflict Resolver Booking Error: ${err.message || 'Error occurred.'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!summary.trim()) return;
+
+    if (conflicts.length > 0 && !bypassConflict) {
+      triggerConflictResolver(conflicts);
+      return;
+    }
 
     setServerConflict(null);
     setIsSubmitting(true);
@@ -341,7 +670,6 @@ export default function CalendarWidget({
     const endDateTime = new Date(`${date}T${endTime}:00`).toISOString();
 
     try {
-      // 1. Submit reservation to central PostgreSQL database via Express API
       await bookingsAPI.create({
         roomId: selectedRoomId,
         roomName,
@@ -350,10 +678,10 @@ export default function CalendarWidget({
         startTime: startDateTime,
         endTime: endDateTime,
         attendeeEmail: attendeeEmail || undefined,
-        facultyId: facultyId || undefined
+        facultyId: facultyId || undefined,
+        bypassConflict: bypassConflict
       });
 
-      // 2. Synchronously trigger optional Google Workspace sync (Calendar, Drive Logs/Receipts)
       const hasGoogleToken = !!sessionStorage.getItem('google_workspace_access_token');
       if (hasGoogleToken) {
         try {
@@ -368,7 +696,6 @@ export default function CalendarWidget({
             attendeeEmail: attendeeEmail || undefined,
           });
 
-          // Upload metadata files to Drive
           const timestamp = Date.now();
           const receiptFilename = `${roomName.replace(/\s+/g, '_')}_Booking_Receipt_${timestamp}.html`;
           const receiptHtml = `
@@ -401,7 +728,6 @@ export default function CalendarWidget({
           `;
           await DriveAPI.createLogFile(receiptFilename, receiptHtml);
 
-          // Dedicated meeting agenda file
           const agendaFilename = `${summary.replace(/\s+/g, '_')}_Meeting_Agenda_${timestamp}.html`;
           const agendaHtml = `
             <!DOCTYPE html>
@@ -458,6 +784,7 @@ export default function CalendarWidget({
     } catch (err: any) {
       if (err.status === 409 && err.conflict) {
         setServerConflict(err.conflict);
+        triggerServerConflictResolver(err.conflict);
       } else {
         alert(`Reservation Error: ${err.message || 'Conflict occurred. Check your timeline settings.'}`);
       }
@@ -662,7 +989,7 @@ export default function CalendarWidget({
                   onChange={(e) => setSelectedRoomId(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
                 >
-                  {rooms.map((room) => (
+                  {(rooms || []).map((room) => (
                     <option key={room.id} value={room.id}>
                       {room.name} (Capacity: {room.capacity})
                     </option>
@@ -1066,6 +1393,173 @@ export default function CalendarWidget({
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Interactive Scheduling Conflict Advisor Modal */}
+      {conflictResolverData && (
+        <div id="conflict_resolver_modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0, y: 15 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl max-h-[90vh] flex flex-col text-left"
+          >
+            {/* Header */}
+            <div className="p-5 bg-rose-950/25 border-b border-rose-900/30 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-rose-950 border border-rose-800/40 rounded-lg text-rose-400">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-100 uppercase tracking-wide font-mono">
+                    Time-Slot Partial Overlap Conflict
+                  </h3>
+                  <p className="text-xs text-rose-300">
+                    Your reservation requests overlap with an existing occupancy constraint. No worries! Select a smart override.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Core Body Container */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              {/* Overlapping Reservation info block */}
+              <div className="p-3.5 bg-slate-950 border border-rose-950 rounded-xl space-y-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block font-mono">
+                  🚨 Overlapping Slot Occupied by Another Reservation:
+                </span>
+                {conflictResolverData.conflictingEvents.map((evt, idx) => {
+                  const sTime = evt.startTime ? new Date(evt.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unknown';
+                  const eTime = evt.endTime ? new Date(evt.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unknown';
+                  return (
+                    <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-200">
+                          "{evt.summary}"
+                        </div>
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          Booked by: <span className="text-slate-300 font-medium">{evt.creatorName}</span>
+                        </div>
+                      </div>
+                      <div className="bg-rose-950/40 text-rose-300 border border-rose-900/35 px-2.5 py-1 rounded-md text-xs font-mono font-bold shrink-0 self-start sm:self-auto uppercase">
+                        {sTime} – {eTime}
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-[11px] text-slate-400 italic pl-1 leading-relaxed">
+                  Requested parameters: <span className="text-slate-300 font-mono font-bold">{conflictResolverData.requestedRoom.name}</span> on <span className="text-slate-300 font-mono font-bold">{conflictResolverData.requestedDate}</span> @ <span className="text-rose-400 font-mono font-bold">{conflictResolverData.requestedStartTime} - {conflictResolverData.requestedEndTime}</span>.
+                </p>
+              </div>
+
+              {/* Option Track A: Shifting to alternative free intervals */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                  <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider font-mono">
+                    Option A: Adjust Time (Smart Alternatives)
+                  </span>
+                </div>
+                {conflictResolverData.suggestedTimes.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {conflictResolverData.suggestedTimes.map((suggestion, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => applySuggestionAndBook(suggestion, undefined)}
+                        disabled={isSubmitting}
+                        className="w-full text-left bg-indigo-950/20 hover:bg-slate-800 border border-indigo-900/35 hover:border-indigo-500/50 p-3.5 rounded-xl transition-all duration-300 cursor-pointer flex items-center justify-between gap-4 group"
+                      >
+                        <div className="space-y-1">
+                          <p className="text-xs font-bold text-indigo-300 group-hover:text-indigo-200">
+                            {suggestion.label}
+                          </p>
+                          <p className="text-[11px] text-slate-400 font-mono">
+                            {suggestion.differenceText}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 bg-indigo-950 group-hover:bg-indigo-600 border border-indigo-800/40 px-3 py-1.5 rounded-lg text-xs font-medium text-indigo-400 group-hover:text-white transition-all uppercase tracking-wider text-[10px] font-bold">
+                          <span>Apply</span>
+                          <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800 italic text-[11px] text-slate-450">
+                    No vacant adjacent window is available today. Shift dates or swap to other spaces in order to bypass this.
+                  </div>
+                )}
+              </div>
+
+              {/* Option Track B: Swapping spaces */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                  <span className="text-xs font-bold text-teal-300 uppercase tracking-wider font-mono">
+                    Option B: Move to Available Room (Original Time)
+                  </span>
+                </div>
+                {conflictResolverData.alternativeRoomsList.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {conflictResolverData.alternativeRoomsList.slice(0, 3).map((altRoom: any) => (
+                      <button
+                        key={altRoom.id}
+                        type="button"
+                        onClick={() => applySuggestionAndBook(undefined, altRoom.id)}
+                        disabled={isSubmitting}
+                        className="w-full text-left bg-teal-950/10 hover:bg-slate-800 border border-teal-900/30 hover:border-teal-500/50 p-3.5 rounded-xl transition-all duration-300 cursor-pointer flex items-center justify-between gap-4 group"
+                      >
+                        <div>
+                          <p className="text-xs font-bold text-slate-200 group-hover:text-teal-300">
+                            Switch to Room: {altRoom.name}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
+                              Capacity: {altRoom.capacity}
+                            </span>
+                            <span className="text-[10px] font-bold text-teal-400 font-mono">
+                              100% VACANT DURING THIS TIME
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 bg-teal-950 group-hover:bg-teal-600 border border-teal-800/40 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-300 group-hover:text-white transition-all uppercase tracking-wider text-[10px] font-bold">
+                          <span>Book Space</span>
+                          <Shuffle className="w-3.5 h-3.5" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800 italic text-[11px] text-slate-450">
+                    All alternate classroom structures are locked during this interval constraint.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Sticky Actions Footer */}
+            <div className="p-5 bg-slate-950 border-t border-slate-800/60 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setBypassConflict(true);
+                  applySuggestionAndBook(undefined, undefined);
+                }}
+                disabled={isSubmitting}
+                className="text-center text-[11px] font-bold text-rose-300 hover:text-rose-200 transition-colors py-2 px-3 hover:bg-rose-950/30 border border-rose-900/25 rounded-xl cursor-pointer order-last sm:order-first"
+              >
+                Force Overrule Bypass Authorization
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => setConflictResolverData(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md transition-all cursor-pointer text-center"
+              >
+                Modify Schedule Manually
+              </button>
+            </div>
           </motion.div>
         </div>
       )}

@@ -1,0 +1,6 @@
+{
+  "firestore": {
+    "database": "ai-studio-iitbhusmartrooms-61a5702e-34be-4557-8bda-187ff265e3c3",
+    "rules": "firestore.rules"
+  }
+}

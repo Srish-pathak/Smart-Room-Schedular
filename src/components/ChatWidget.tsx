@@ -7,9 +7,10 @@ import { motion } from 'motion/react';
 interface ChatWidgetProps {
   chatLog: { space: string; text: string; time: string }[];
   setChatLog: React.Dispatch<React.SetStateAction<{ space: string; text: string; time: string }[]>>;
+  addToast?: (message: string, type?: 'success' | 'info' | 'error') => void;
 }
 
-export default function ChatWidget({ chatLog, setChatLog }: ChatWidgetProps) {
+export default function ChatWidget({ chatLog, setChatLog, addToast }: ChatWidgetProps) {
   const [spaces, setSpaces] = useState<ChatSpace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +63,11 @@ export default function ChatWidget({ chatLog, setChatLog }: ChatWidgetProps) {
           },
           ...prev,
         ]);
-        alert('Sandbox message recorded successfully! Simulated Google Chat API post executed.');
+        if (addToast) {
+          addToast('Sandbox message recorded successfully! Simulated Google Chat API post executed.', 'success');
+        } else {
+          alert('Sandbox message recorded successfully! Simulated Google Chat API post executed.');
+        }
         setMessageText('');
       } else {
         await ChatAPI.postMessage(selectedSpace, messageText);
@@ -74,11 +79,19 @@ export default function ChatWidget({ chatLog, setChatLog }: ChatWidgetProps) {
           },
           ...prev,
         ]);
-        alert('Message posted to Google Chat space successfully!');
+        if (addToast) {
+          addToast('Message posted to Google Chat space successfully!', 'success');
+        } else {
+          alert('Message posted to Google Chat space successfully!');
+        }
         setMessageText('');
       }
     } catch (err: any) {
-      alert(err.message || 'Google Chat posting failed.');
+      if (addToast) {
+        addToast(err.message || 'Google Chat posting failed.', 'error');
+      } else {
+        alert(err.message || 'Google Chat posting failed.');
+      }
     } finally {
       setPosting(false);
     }

@@ -1,93 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 :root {
-  /* DARK THEME (Original exquisite teal-slate palette) */
-  --indigo-50: #f0fdfa;
-  --indigo-100: #ccfbf1;
-  --indigo-200: #99f6e4;
-  --indigo-300: #5eead4;
-  --indigo-400: #2dd4bf;
-  --indigo-500: #0d9488;  /* Vibrant teal accent from the uploaded image */
-  --indigo-600: #0f766e;  /* Deep teal accent */
-  --indigo-700: #115e59;
-  --indigo-800: #134e4a;
-  --indigo-900: #042f2e;
-  --indigo-950: #011c1b;
+  /* IIT (BHU) Premium Theme Color Palette: Forest Greens, Cream, and Soft Golds */
+  --indigo-50: #faf8f2;     /* Extra light cream */
+  --indigo-100: #f6ebd4;    /* Light gold/cream */
+  --indigo-200: #ead29c;    /* Soft gold */
+  --indigo-300: #dfb965;    /* Premium gold */
+  --indigo-400: #d4af37;    /* IIT BHU Gold accent */
+  --indigo-500: #c09728;    /* Deep gold accent */
+  --indigo-600: #0a4735;    /* IIT BHU Forest Green (medium) */
+  --indigo-700: #073b2c;    /* Deep Forest Green */
+  --indigo-800: #042e22;    /* Darkest Forest Green */
+  --indigo-900: #021e16;    /* Ultra Deep Green */
+  --indigo-950: #01120d;    /* Sacred Forest Green shadow */
 
-  --violet-50: #ecfeff;
-  --violet-100: #cffafe;
-  --violet-200: #a5f3fc;
-  --violet-300: #67e8f9;
-  --violet-400: #22d3ee;
-  --violet-500: #06b6d4;  /* Luminous cyan accent helper */
-  --violet-600: #0891b2;
-  --violet-700: #0e7490;
-  --violet-800: #155e75;
-  --violet-900: #164e63;
-  --violet-950: #083344;
+  --violet-50: #fcfaf6;     /* Cream background light */
+  --violet-100: #f7f3e8;    /* Muted gold-white */
+  --violet-200: #ebdcb9;    /* Gold highlight border */
+  --violet-300: #d4c28d;
+  --violet-400: #bfa660;
+  --violet-500: #c5a039;    /* Luminous gold tint */
+  --violet-600: #a78129;
+  --violet-700: #8b661d;
+  --violet-800: #6e4e14;
+  --violet-900: #52380d;
+  --violet-950: #352106;
 
-  --slate-50: #f0f9f9;
-  --slate-100: #e0eeee;
-  --slate-200: #c2dede;
-  --slate-300: #9cc4c4;
-  --slate-400: #71a9a8;
-  --slate-500: #4ba09f;
-  --slate-600: #307e7d;
-  --slate-700: #215c5a;
-  --slate-750: #124341;
-  --slate-800: #0c3231;
-  --slate-850: #082221;
-  --slate-900: #031615;  /* Deep rich tea-slate for panel cards */
-  --slate-950: #010c0b;  /* Dark terminal body tea-slate for background */
+  /* Neutrals mapped for soft cream/white layouts and rich green-charcoal typography */
+  --slate-50: #031c14;      /* Pure rich ink-green-black for headings */
+  --slate-100: #062b1f;     /* Deep forest green headings */
+  --slate-200: #0c3e2e;     /* Interactive elements and sub-text */
+  --slate-300: #265545;     /* Body labels & titles */
+  --slate-400: #496c5f;     /* Descriptions & inactive subheadings */
+  --slate-500: #074735;     /* Highlight indicator color */
+  --slate-600: #053b2c;     /* Accent borders/indicators */
+  --slate-700: #032e22;     /* Forest deep background */
+  --slate-750: #e8e4da;     /* Subtle warm-cream separator borders */
+  --slate-800: #faf8f5;     /* Muted layout panels and tables */
+  --slate-850: #f4f1e9;     /* Cream background card tracks */
+  --slate-900: #ffffff;     /* Pure, high-end white card canvases */
+  --slate-950: #FAF9F5;     /* Exquisite warm-cream page background canvas */
 
-  --text-main: #ffffff;
-}
-
-:root.light {
-  /* LIGHT PROGRESSIVE THEME (Crisp Academic Clean Theme) */
-  --indigo-50: #042f2e;
-  --indigo-100: #0f766e;
-  --indigo-200: #115e59;
-  --indigo-300: #0d9488;
-  --indigo-400: #0284c7;
-  --indigo-500: #0369a1;  /* High contrast rich academic blue-teal button bg */
-  --indigo-600: #0284c7;  /* Hover button states */
-  --indigo-700: #bae6fd;
-  --indigo-800: #e0f2fe;
-  --indigo-900: #f0f9ff;
-  --indigo-950: #0369a1;
-
-  --violet-50: #083344;
-  --violet-100: #0e7490;
-  --violet-200: #06b6d4;
-  --violet-300: #0891b2;
-  --violet-400: #a5f3fc;
-  --violet-500: #0284c7;
-  --violet-600: #0369a1;
-  --violet-700: #e0f2fe;
-  --violet-800: #f0f9ff;
-  --violet-900: #f4fbfb;
-  --violet-950: #0284c7;
-
-  /* Warm, clean, bright white and crisp slate grays for cards and headers */
-  --slate-50: #0f172a;   /* Extremely readable high-contrast dark text */
-  --slate-100: #1e293b;  /* Faculty/admin cards headings */
-  --slate-200: #334155;  /* Labels & key details */
-  --slate-300: #475569;  /* Secondary informative text */
-  --slate-400: #64748b;  /* Help tips & borders */
-  --slate-500: #0284c7;  /* High contrast indicators */
-  --slate-600: #0369a1;
-  --slate-700: #0c4a6e;
-  --slate-750: #e2e8f0;  /* Clean light borders */
-  --slate-800: #f1f5f9;  /* Light slate backgrounds */
-  --slate-850: #f8fafc;  /* Soft panel body sections */
-  --slate-900: #ffffff;  /* Pure white crisp card sheets */
-  --slate-950: #f8fafc;  /* Soft light background body */
-
-  --text-main: #0f172a;
+  --text-main: #031c14;
 }
 
 @theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-mono: "JetBrains Mono", monospace;
+
   --color-indigo-50: var(--indigo-50);
   --color-indigo-100: var(--indigo-100);
   --color-indigo-200: var(--indigo-200);
@@ -128,40 +91,11 @@
   --color-slate-950: var(--slate-950);
 }
 
-/* Base style adaptation for light/dark transitions */
 html, body, #root {
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-/* Global utility class overrides to enforce absolute elite high-contrast viewing on light theme */
-:root.light .text-white {
-  color: #0f172a !important;
-}
-
-:root.light .bg-indigo-950\/40,
-:root.light .bg-indigo-950\/20,
-:root.light .bg-indigo-950\/60 {
-  background-color: #f0fdfa !important;
-}
-
-:root.light .bg-slate-1000\/60,
-:root.light .bg-slate-950\/40,
-:root.light .bg-slate-950\/80 {
-  background-color: #f8fafc !important;
-}
-
-:root.light input::placeholder,
-:root.light select::placeholder {
-  color: #94a3b8 !important;
-}
-
-:root.light header {
-  background-color: rgba(255, 255, 255, 0.85) !important;
-  border-bottom: 1px solid #e2e8f0 !important;
-}
-
-:root.light .bg-gradient-to-tr {
-  background-image: linear-gradient(to top right, var(--indigo-500), var(--violet-600)) !important;
+  background-color: var(--slate-950);
+  color: var(--slate-100);
+  font-family: var(--font-sans);
+  min-height: 100vh;
 }
 
 /* Transition for rotation and spins */
@@ -176,4 +110,21 @@ html, body, #root {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Custom premium scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--slate-950);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--indigo-200);
+  border-radius: 9999px;
+  border: 3px solid var(--slate-950);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--indigo-300);
 }

@@ -6,6 +6,11 @@ export interface Room {
   features: string[];
   image: string;
   color: string;
+  building?: string;
+  category?: string;
+  floor?: string;
+  bestFor?: string;
+  contactDepartment?: string;
 }
 
 export interface Booking {

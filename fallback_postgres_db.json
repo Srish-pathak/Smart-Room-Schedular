@@ -1,0 +1,172 @@
+{
+  "rooms": [
+    {
+      "id": "room-1",
+      "name": "S.N. Bose Seminar Hall",
+      "capacity": 60,
+      "features": [
+        "Laser Projector",
+        "Acoustic Soundproofing",
+        "Video Conferencing",
+        "Dual Glass Whiteboards",
+        "Executive Faculty seating"
+      ],
+      "image": "https://images.unsplash.com/photo-1517502884422-41eaaced0168?w=800&auto=format&fit=crop&q=60",
+      "color": "from-slate-700 to-slate-900"
+    },
+    {
+      "id": "room-2",
+      "name": "Ramanujan Computing Centre",
+      "capacity": 45,
+      "features": [
+        "High-Performance Computing cluster access",
+        "High-Speed Fiber Ethernet",
+        "Ultrawide Screen projection",
+        "Individual power outlets",
+        "Smart cooling"
+      ],
+      "image": "https://images.unsplash.com/photo-1497366216548-37526070297c?w=800&auto=format&fit=crop&q=60",
+      "color": "from-violet-600 to-indigo-800"
+    },
+    {
+      "id": "room-3",
+      "name": "Visvesvaraya Conference Room",
+      "capacity": 18,
+      "features": [
+        "85\" 4K Video Display",
+        "Surround sound conferencing",
+        "Smart Capture Canvas",
+        "Ergonomic Boardroom seating",
+        "Integrated coffee bar"
+      ],
+      "image": "https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=800&auto=format&fit=crop&q=60",
+      "color": "from-amber-600 to-orange-800"
+    },
+    {
+      "id": "room-4",
+      "name": "Aryabhata Lecture Theatre",
+      "capacity": 120,
+      "features": [
+        "Staged Amphitheatre acoustics",
+        "Dual high-lumen projectors",
+        "Lavalier Microphone sound system",
+        "Writeable Whiteboard walls",
+        "Automated recording rig"
+      ],
+      "image": "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&auto=format&fit=crop&q=60",
+      "color": "from-teal-600 to-emerald-800"
+    }
+  ],
+  "users": [
+    {
+      "id": "user-admin",
+      "email": "admin@iitbhu.ac.in",
+      "password": "admin123",
+      "name": "Prof. Rajeev Sangal (Admin)",
+      "role": "admin",
+      "created_at": "2026-06-17T04:19:38.608Z"
+    },
+    {
+      "id": "user-bandana",
+      "email": "bandanapathak12@gmail.com",
+      "password": "password123",
+      "name": "Bandana Pathak (Admin)",
+      "role": "admin",
+      "created_at": "2026-06-17T04:19:38.608Z"
+    },
+    {
+      "id": "user-faculty",
+      "email": "faculty@iitbhu.ac.in",
+      "password": "faculty123",
+      "name": "Dr. S. K. Shrivastava (Faculty)",
+      "role": "faculty",
+      "created_at": "2026-06-17T04:19:38.608Z"
+    },
+    {
+      "id": "user-student",
+      "email": "student@iitbhu.ac.in",
+      "password": "student123",
+      "name": "Abishek Kumar (Student User)",
+      "role": "student",
+      "created_at": "2026-06-17T04:19:38.608Z"
+    }
+  ],
+  "bookings": [
+    {
+      "id": "book-48x3zku",
+      "room_id": "room-2",
+      "room_name": "Ramanujan Computing Centre",
+      "summary": "Abc",
+      "agenda": "xyz",
+      "start_time": "2026-06-17T03:30:00.000Z",
+      "end_time": "2026-06-17T04:30:00.000Z",
+      "creator_name": "Prof. Rajeev Sangal (Admin)",
+      "creator_email": "admin@iitbhu.ac.in",
+      "faculty_id": "Srish",
+      "attendee_email": "pathaksrishti2208@gmail.com",
+      "created_at": "2026-06-17T04:42:02.849Z"
+    },
+    {
+      "id": "book-svirjtt",
+      "room_id": "room-2",
+      "room_name": "Ramanujan Computing Centre",
+      "summary": "abcde",
+      "agenda": "xyz",
+      "start_time": "2026-06-17T04:30:00.000Z",
+      "end_time": "2026-06-17T05:30:00.000Z",
+      "creator_name": "Prof. Rajeev Sangal (Admin)",
+      "creator_email": "admin@iitbhu.ac.in",
+      "faculty_id": "Pathak",
+      "attendee_email": "pathaksrishti2208@gmail.com",
+      "created_at": "2026-06-17T04:42:56.197Z"
+    },
+    {
+      "id": "book-yml43ji",
+      "room_id": "room-3",
+      "room_name": "Visvesvaraya Conference Room",
+      "summary": "heyyyy",
+      "agenda": "yepp",
+      "start_time": "2026-06-17T03:30:00.000Z",
+      "end_time": "2026-06-17T04:30:00.000Z",
+      "creator_name": "Dr. S. K. Shrivastava (Faculty)",
+      "creator_email": "faculty@iitbhu.ac.in",
+      "faculty_id": "shukla ji",
+      "attendee_email": "srishti.23190503052@cuj.ac.in",
+      "created_at": "2026-06-17T05:08:22.544Z"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "notif-m8aznt6",
+      "title": "Booking Approved ✓",
+      "message": "Dr. S. K. Shrivastava (Faculty) established a reservation for \"Visvesvaraya Conference Room\" (heyyyy).",
+      "type": "success",
+      "read": true,
+      "created_at": "2026-06-17T05:08:22.544Z"
+    },
+    {
+      "id": "notif-pzo19r2",
+      "title": "Booking Approved ✓",
+      "message": "Prof. Rajeev Sangal (Admin) established a reservation for \"Ramanujan Computing Centre\" (abcde).",
+      "type": "success",
+      "read": true,
+      "created_at": "2026-06-17T04:42:56.197Z"
+    },
+    {
+      "id": "notif-kbnm0c8",
+      "title": "Booking Approved ✓",
+      "message": "Prof. Rajeev Sangal (Admin) established a reservation for \"Ramanujan Computing Centre\" (Abc).",
+      "type": "success",
+      "read": true,
+      "created_at": "2026-06-17T04:42:02.850Z"
+    },
+    {
+      "id": "notif-1",
+      "title": "IIT BHU Space Scheduler Activated",
+      "message": "The smart room booking database engine is online and persistent.",
+      "type": "info",
+      "read": true,
+      "created_at": "2026-06-17T04:19:51.784Z"
+    }
+  ]
+}

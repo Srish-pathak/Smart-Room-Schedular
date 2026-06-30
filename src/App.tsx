@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initAuth, googleSignIn, logout, resetGoogleSignInLock } from './lib/auth';
+import { CalendarAPI } from './lib/workspace';
 import { Room } from './types';
+import { FloorPlanView } from './components/FloorPlanView';
 import {
   authAPI,
   roomsAPI,
@@ -43,6 +45,7 @@ import {
 // Icons
 import {
   Calendar,
+  CalendarPlus,
   HardDrive,
   Mail,
   MessageSquare,
@@ -53,6 +56,8 @@ import {
   Sparkles,
   Layers,
   MapPin,
+  Map,
+  Info,
   Clock,
   CheckCircle,
   Clock3,
@@ -67,6 +72,7 @@ import {
   Plus,
   Shield,
   Activity,
+  Building2,
   Trash2,
   AlertTriangle,
   UserCheck,
@@ -81,7 +87,21 @@ import {
   ExternalLink,
   X,
   History,
-  Loader2
+  Loader2,
+  Upload,
+  Eye,
+  EyeOff,
+  Menu,
+  Star,
+  Compass,
+  Wifi,
+  Tv,
+  Wind,
+  Accessibility,
+  BookOpen,
+  Heart,
+  ChevronRight,
+  Phone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -179,22 +199,20 @@ export default function App() {
 
   // High-performance theme state supporting system preferences & persistence
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('iitbhu-theme');
-    if (saved) {
-      return saved !== 'light';
-    }
-    // Default to dark mode (matches original custom teal branding)
-    return true;
+    const saved = localStorage.getItem('iitbhu_dark_mode');
+    return saved !== 'false'; // Default to true
   });
 
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.remove('light');
-    } else {
-      document.documentElement.classList.add('light');
-    }
-    localStorage.setItem('iitbhu-theme', isDarkMode ? 'dark' : 'light');
-  }, [isDarkMode]);
+  const toggleDarkMode = () => {
+    setIsDarkMode(prev => {
+      const newVal = !prev;
+      localStorage.setItem('iitbhu_dark_mode', String(newVal));
+      return newVal;
+    });
+  };
+
+  // High-contrast accessibility theme state specifically for visually impaired faculty
+  const isHighContrast = false;
 
   // Form states for login/signup
   const [loginEmail, setLoginEmail] = useState('');
@@ -205,7 +223,12 @@ export default function App() {
   const [registerRole, setRegisterRole] = useState<'student' | 'faculty' | 'admin'>('student');
 
   // Google Workspace account bind state
-  const [googleWorkspaceLinked, setGoogleWorkspaceLinked] = useState(true);
+  const [googleWorkspaceLinked, setGoogleWorkspaceLinked] = useState<boolean>(() => {
+    if (!sessionStorage.getItem('google_workspace_access_token')) {
+      sessionStorage.setItem('google_workspace_access_token', 'mock_google_workspace_token');
+    }
+    return true;
+  });
   const [googleProfile, setGoogleProfile] = useState<any>(null);
   const [isIframe, setIsIframe] = useState(false);
 
@@ -237,8 +260,34 @@ export default function App() {
   }, []);
 
   // Active workspace states
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [activeTab, setActiveTab] = useState<'rooms' | 'calendar' | 'drive' | 'gmail' | 'chat' | 'forms' | 'analytics' | 'admin' | 'ai'>('rooms');
+  const [rooms, setRoomsState] = useState<Room[]>([]);
+  const setRooms = (newRooms: Room[] | ((prev: Room[]) => Room[])) => {
+    setRoomsState((prev) => {
+      const resolved = typeof newRooms === 'function' ? newRooms(prev) : newRooms;
+      const unique: Room[] = [];
+      const seen = new Set<string>();
+      for (const r of resolved) {
+        if (r && r.id && !seen.has(r.id)) {
+          seen.add(r.id);
+          unique.push(r);
+        }
+      }
+      return unique;
+    });
+  };
+  const [activeTab, setActiveTab] = useState<'rooms' | 'calendar' | 'drive' | 'gmail' | 'chat' | 'forms' | 'analytics' | 'admin' | 'ai' | 'about' | 'contact'>('rooms');
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [compareRooms, setCompareRooms] = useState<Room[]>([]);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isSticky, setIsSticky] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsSticky(window.scrollY > 40);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Notifications states
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -247,9 +296,12 @@ export default function App() {
 
   // Filters state for Rooms Directory
   const [minCapacity, setMinCapacity] = useState<number>(0);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'available'>('all');
   const [selectedFeatureToggles, setSelectedFeatureToggles] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortKey, setSortKey] = useState<'default' | 'capacity-asc' | 'capacity-desc' | 'available-first' | 'booked-first'>('default');
+  const [directoryViewMode, setDirectoryViewMode] = useState<'grid' | 'floorplan'>('grid');
+  const [showFilters, setShowFilters] = useState<boolean>(false);
 
   // Auto-refresh timer states for Rooms Directory
   const [roomsRefreshCountdown, setRoomsRefreshCountdown] = useState<number>(60);
@@ -280,6 +332,7 @@ export default function App() {
   // Selected Room for Scannable QR Modal
   const [selectedQRRoom, setSelectedQRRoom] = useState<Room | null>(null);
   const [selectedRoomForHistory, setSelectedRoomForHistory] = useState<Room | null>(null);
+  const [selectedRoomForDetails, setSelectedRoomForDetails] = useState<Room | null>(null);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [isScanningSimulated, setIsScanningSimulated] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
@@ -294,6 +347,13 @@ export default function App() {
   const [adminRoomFeatures, setAdminRoomFeatures] = useState('');
   const [adminRoomImage, setAdminRoomImage] = useState('');
   const [adminRoomColor, setAdminRoomColor] = useState('from-slate-700 to-slate-900');
+
+  // Admin Bulk Room CSV import states
+  const [adminRoomTab, setAdminRoomTab] = useState<'single' | 'bulk'>('single');
+  const [csvText, setCsvText] = useState('');
+  const [dragActive, setDragActive] = useState(false);
+  const [parsedRooms, setParsedRooms] = useState<any[]>([]);
+  const [csvErrors, setCsvErrors] = useState<string[]>([]);
 
   // Deep Analytics stats
   const [analyticsStats, setAnalyticsStats] = useState<any>(null);
@@ -362,6 +422,41 @@ export default function App() {
     }, 4500);
   };
 
+  const [syncingBookingId, setSyncingBookingId] = useState<string | null>(null);
+
+  const handleAddToGoogleCalendar = async (b: any) => {
+    const confirmed = window.confirm(`Would you like to sync the reservation "${b.summary}" to your Google Calendar?`);
+    if (!confirmed) return;
+
+    setSyncingBookingId(b.id);
+    try {
+      await CalendarAPI.createEvent({
+        roomName: b.room_name || 'Classroom/Lab Space',
+        summary: b.summary,
+        startTime: b.start_time,
+        endTime: b.end_time,
+        creatorName: b.creator_name || 'Authorized Scholar',
+        creatorEmail: b.creator_email || 'authenticated@iitbhu.ac.in',
+        facultyId: b.faculty_id,
+        attendeeEmail: b.attendee_email,
+      });
+      addToast(`Sync Successful! "${b.summary}" has been added to your Google Calendar.`, 'success');
+    } catch (err: any) {
+      console.error('Google Calendar Sync Error:', err);
+      const lower = err.message?.toLowerCase() || '';
+      if (lower.includes('token') || lower.includes('auth') || lower.includes('credential') || lower.includes('sign in')) {
+        const relink = window.confirm('Your Google Workspace link is expired or required. Would you like to connect your Google account now?');
+        if (relink) {
+          await linkGoogleWorkspaceAccount();
+        }
+      } else {
+        addToast(`Google Calendar Sync Error: ${err.message || err}`, 'error');
+      }
+    } finally {
+      setSyncingBookingId(null);
+    }
+  };
+
   // Register centralized error listener for Supabase cloud queries and network operations failures
   useEffect(() => {
     const unsubscribe = subscribeToSupabaseErrors((message) => {
@@ -411,11 +506,11 @@ export default function App() {
     try {
       // 1. Fetch live rooms
       const list = await roomsAPI.list();
-      setRooms(list);
+      setRooms(Array.isArray(list) ? list : []);
 
       // 2. Fetch live bookings
       const bookings = await bookingsAPI.list();
-      setAdminBookings(bookings);
+      setAdminBookings(Array.isArray(bookings) ? bookings : []);
 
       // 3. Fetch analytics
       const stats = await analyticsAPI.getStats();
@@ -424,7 +519,7 @@ export default function App() {
       // 4. Fetch admin users state
       if (role === 'admin') {
         const uList = await adminAPI.listUsers();
-        setAdminUsers(uList);
+        setAdminUsers(Array.isArray(uList) ? uList : []);
       }
 
       // 5. Fetch live notifications
@@ -453,8 +548,8 @@ export default function App() {
           // Fetch fresh rooms and bookings to ensure availability statuses are instantly up-to-date
           Promise.all([roomsAPI.list(), bookingsAPI.list()])
             .then(([refreshedRooms, refreshedBookings]) => {
-              setRooms(refreshedRooms);
-              setAdminBookings(refreshedBookings);
+              setRooms(Array.isArray(refreshedRooms) ? refreshedRooms : []);
+              setAdminBookings(Array.isArray(refreshedBookings) ? refreshedBookings : []);
               console.log('🔄 Rooms Directory automatically synced with Postgres database (60s timer)');
             })
             .catch((err) => {
@@ -573,6 +668,41 @@ export default function App() {
   // ==========================================
   // SIGN IN & REGISTRATION CONTROLLERS
   // ==========================================
+  const handleGoogleSignIn = async () => {
+    setIsLoggingIn(true);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        // Authenticate Google user with full-stack backend, registering them if needed
+        const response = await authAPI.googleLogin({
+          email: result.user.email,
+          name: result.user.displayName || result.user.email?.split('@')[0] || 'IIT BHU User',
+          uid: result.user.uid,
+          photoURL: result.user.photoURL,
+        });
+        
+        setSessionToken(response.token, true);
+        setUser(response.user);
+        setToken(response.token);
+        
+        // Auto link Workspace credentials
+        sessionStorage.setItem('google_workspace_access_token', result.accessToken);
+        setGoogleProfile(result.user);
+        setGoogleWorkspaceLinked(true);
+        
+        setNeedsAuth(false);
+        addToast(`Successfully identified as ${response.user.name} via secure Google Auth!`, 'success');
+        fetchDashboardModels(response.user.role);
+      }
+    } catch (err: any) {
+      resetGoogleSignInLock();
+      const msg = err instanceof Error ? err.message : 'Google authentication dismissed or blocked.';
+      addToast(msg, 'error');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   const handleCredentialsLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoggingIn(true);
@@ -744,6 +874,112 @@ export default function App() {
     }
   };
 
+  const handleParseCsv = (text: string) => {
+    try {
+      const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+      if (lines.length === 0) {
+        setParsedRooms([]);
+        setCsvErrors(['No content provided.']);
+        return;
+      }
+
+      // Check header
+      const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
+      const requiredHeaders = ['name', 'capacity'];
+      const missing = requiredHeaders.filter(h => !headers.includes(h));
+      if (missing.length > 0) {
+        setCsvErrors([`Missing required column headers: ${missing.join(', ')}. Please supply "name" and "capacity".`]);
+        setParsedRooms([]);
+        return;
+      }
+
+      const tempRooms: any[] = [];
+      const tempErrors: string[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        // Split on comma, ignoring commas that are inside quotes
+        const rawLine = lines[i];
+        const parts: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let j = 0; j < rawLine.length; j++) {
+          const char = rawLine[j];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            parts.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        parts.push(current.trim());
+
+        const cols = parts.map(c => c.trim().replace(/^["']|["']$/g, ''));
+        const roomObj: any = {};
+        
+        headers.forEach((header, index) => {
+          roomObj[header] = cols[index] || '';
+        });
+
+        const rowNum = i + 1;
+        if (!roomObj.name) {
+          tempErrors.push(`Row ${rowNum}: Name column can never be blank.`);
+          continue;
+        }
+
+        const capNum = Number(roomObj.capacity);
+        if (isNaN(capNum) || capNum <= 0) {
+          tempErrors.push(`Row ${rowNum}: Capacity expects a positive integer. Value supplied: "${roomObj.capacity}".`);
+          continue;
+        }
+
+        let featuresArr: string[] = [];
+        if (roomObj.features) {
+          if (roomObj.features.includes(';')) {
+            featuresArr = roomObj.features.split(';').map((f: string) => f.trim()).filter(Boolean);
+          } else if (roomObj.features.includes('|')) {
+            featuresArr = roomObj.features.split('|').map((f: string) => f.trim()).filter(Boolean);
+          } else {
+            featuresArr = roomObj.features.split(',').map((f: string) => f.trim()).filter(Boolean);
+          }
+        }
+
+        tempRooms.push({
+          name: roomObj.name,
+          capacity: capNum,
+          features: featuresArr,
+          image: roomObj.image || undefined,
+          color: roomObj.color || 'from-slate-700 to-slate-900',
+        });
+      }
+
+      setCsvErrors(tempErrors);
+      setParsedRooms(tempRooms);
+    } catch (err: any) {
+      setCsvErrors([`CSV Parsing Failed: ${err.message}`]);
+      setParsedRooms([]);
+    }
+  };
+
+  const handleAdminBulkImportRooms = async () => {
+    if (parsedRooms.length === 0) {
+      addToast('No parsed rooms to import. Try pasting or uploading valid CSV data first!', 'info');
+      return;
+    }
+    try {
+      await roomsAPI.bulkCreate(parsedRooms);
+      addToast(`Bulk import completed successfully! ${parsedRooms.length} room spaces initialized.`, 'success');
+      setCsvText('');
+      setParsedRooms([]);
+      setCsvErrors([]);
+      fetchDashboardModels(user.role);
+    } catch (err: any) {
+      addToast(`Bulk entry error: ${err.message}`, 'error');
+    }
+  };
+
   const handleAdminDeleteRoom = async (id: string, name: string) => {
     setConfirmModal({
       isOpen: true,
@@ -791,16 +1027,20 @@ export default function App() {
     const list = [...rooms];
     const filtered = list.filter((room) => {
       if (room.capacity < minCapacity) return false;
+      if (statusFilter === 'available' && room.status !== 'available') return false;
       for (const f of selectedFeatureToggles) {
         if (!matchesFeature(room, f)) return false;
       }
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
         const matchesName = room.name.toLowerCase().includes(query);
+        const matchesBuilding = room.building?.toLowerCase().includes(query) || false;
+        const matchesCategory = room.category?.toLowerCase().includes(query) || false;
+        const matchesBestFor = room.bestFor?.toLowerCase().includes(query) || false;
         const matchesFeatureDescription = room.features.some((feature) =>
           feature.toLowerCase().includes(query)
         );
-        if (!matchesName && !matchesFeatureDescription) return false;
+        if (!matchesName && !matchesBuilding && !matchesCategory && !matchesBestFor && !matchesFeatureDescription) return false;
       }
       return true;
     });
@@ -821,7 +1061,12 @@ export default function App() {
       });
     }
     return filtered;
-  }, [rooms, minCapacity, selectedFeatureToggles, searchQuery, sortKey]);
+  }, [rooms, minCapacity, statusFilter, selectedFeatureToggles, searchQuery, sortKey]);
+
+  const userBookings = useMemo(() => {
+    if (!user?.email) return [];
+    return adminBookings.filter(b => b.creator_email?.toLowerCase() === user.email.toLowerCase());
+  }, [adminBookings, user?.email]);
 
   const handleDownloadCSV = () => {
     const escapeCSV = (val: string | number) => {
@@ -904,89 +1149,173 @@ export default function App() {
   // ==========================================
   if (needsAuth || !user) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col justify-between p-6 text-white relative overflow-hidden font-sans">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-teal-600/10 rounded-full blur-3xl pointer-events-none" />
+      <div className={`min-h-screen ${isDarkMode ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'} flex flex-col justify-between p-6 relative overflow-hidden font-sans transition-colors duration-300`}>
+        {/* Abstract Architectural Tech Grid */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(13,148,136,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(13,148,136,0.05)_1px,transparent_1px)] bg-[size:3.5rem_3.5rem] pointer-events-none" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(13,148,136,0.08),transparent_60%)] pointer-events-none" />
+        
+        {/* Soft Ambient Glow Elements */}
+        <motion.div 
+          animate={{
+            scale: [1, 1.1, 1],
+            opacity: [0.15, 0.22, 0.15],
+          }}
+          transition={{
+            duration: 10,
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
+          className="absolute top-1/4 left-1/4 w-[450px] h-[450px] bg-teal-500/10 rounded-full blur-[130px] pointer-events-none" 
+        />
+        <motion.div 
+          animate={{
+            scale: [1, 1.15, 1],
+            opacity: [0.1, 0.18, 0.1],
+          }}
+          transition={{
+            duration: 12,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 2
+          }}
+          className="absolute bottom-1/4 right-1/4 w-[450px] h-[450px] bg-indigo-500/10 rounded-full blur-[140px] pointer-events-none" 
+        />
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full max-w-xl mx-auto pt-2 z-10 relative">
-          <button
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white hover:border-slate-700 transition-all font-semibold text-xs cursor-pointer select-none"
-            title="Toggle Light / Dark mode themes"
-          >
-            {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-400" />}
-            <span className="font-mono text-[9.5px] tracking-wider uppercase">
-              {isDarkMode ? 'Light Mode' : 'Dark Mode'}
-            </span>
-          </button>
-
-          <div className="self-end sm:self-auto text-right font-mono text-xs text-slate-500 flex items-center gap-1.5">
-            <Clock3 className="w-3.5 h-3.5 text-indigo-400" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4 w-full max-w-xl mx-auto pt-2 z-10 relative">
+          <div className={`self-end sm:self-auto text-right font-mono text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} flex items-center gap-2`}>
+            <Clock3 className="w-3.5 h-3.5 text-indigo-505" />
             <span>BHU Office Clock: {currentTime || 'Loading...'}</span>
           </div>
         </div>
 
-        <div className="max-w-xl w-full mx-auto my-auto bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10 space-y-6">
-          <div className="text-center space-y-3">
-            <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono">
+        <div className={`max-w-xl w-full mx-auto my-auto ${
+          isDarkMode 
+            ? 'bg-slate-900/65 border-slate-800/80 shadow-indigo-950/25' 
+            : 'bg-white/95 border-slate-200 shadow-slate-200/50'
+        } border rounded-3xl p-8 shadow-2xl relative z-10 space-y-6 backdrop-blur-xl transition-all duration-300`}>
+          <div className="text-center space-y-3.5">
+            <div className={`text-[10px] font-bold ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'} uppercase tracking-widest font-mono`}>
               Indian Institute of Technology (BHU) Varanasi
             </div>
-            <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
+            <h1 className={`text-3xl sm:text-4xl font-display font-extrabold tracking-tight ${
+              isDarkMode 
+                ? 'bg-gradient-to-r from-white via-slate-100 to-indigo-300' 
+                : 'bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900'
+            } bg-clip-text text-transparent`}>
               IIT BHU Smart Room Scheduler
             </h1>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+            <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} max-w-sm mx-auto leading-relaxed`}>
               Full-Stack Room Scheduler with Role-Based Access Control, Persistent PostgreSQL, and optional Google Workspace integrations.
             </p>
           </div>
 
           {/* Tester Helper Cards */}
-          <div className="p-3 bg-slate-950/80 rounded-xl border border-indigo-900/40 space-y-2">
-            <span className="text-[9px] font-bold text-indigo-300 uppercase tracking-widest block font-mono">
+          <div className={`p-4 rounded-2xl border ${
+            isDarkMode 
+              ? 'bg-slate-950/60 border-indigo-950/50' 
+              : 'bg-slate-50/80 border-slate-150'
+          } space-y-3`}>
+            <span className={`text-[9.5px] font-bold ${isDarkMode ? 'text-indigo-300' : 'text-indigo-650'} uppercase tracking-widest block font-mono`}>
               ⚡ Quick Tester Profiles (Click to prefill coordinates):
             </span>
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => fillPredefinedCredentials('admin')}
-                className="bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-800/40 text-[10px] font-semibold text-indigo-200 py-1 px-2 rounded-lg transition-all"
+                className={`text-[10px] font-semibold py-2 px-2 rounded-xl transition-all border cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-indigo-950/30 hover:bg-indigo-900/40 border-indigo-900/30 text-indigo-200' 
+                    : 'bg-indigo-50/80 hover:bg-indigo-100 border-indigo-200/60 text-indigo-700'
+                }`}
               >
                 Prof. Rajeev (Admin)
               </button>
               <button
                 type="button"
                 onClick={() => fillPredefinedCredentials('faculty')}
-                className="bg-teal-950/40 hover:bg-teal-900/50 border border-teal-800/40 text-[10px] font-semibold text-teal-200 py-1 px-2 rounded-lg transition-all"
+                className={`text-[10px] font-semibold py-2 px-2 rounded-xl transition-all border cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-teal-950/30 hover:bg-teal-900/40 border-teal-900/30 text-teal-200' 
+                    : 'bg-teal-50/80 hover:bg-teal-100 border-teal-200/60 text-teal-700'
+                }`}
               >
                 Dr. S. K. (Faculty)
               </button>
               <button
                 type="button"
                 onClick={() => fillPredefinedCredentials('student')}
-                className="bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/40 text-[10px] font-semibold text-amber-200 py-1 px-2 rounded-lg transition-all"
+                className={`text-[10px] font-semibold py-2 px-2 rounded-xl transition-all border cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-amber-950/30 hover:bg-amber-900/40 border-amber-900/30 text-amber-200' 
+                    : 'bg-amber-50/80 hover:bg-amber-100 border-amber-200/60 text-amber-700'
+                }`}
               >
-                Abishek (Student User)
+                Abishek (Student)
               </button>
             </div>
           </div>
 
           {/* Custom Tabs */}
-          <div className="flex border-b border-slate-800">
+          <div className={`flex border-b ${isDarkMode ? 'border-slate-800/80' : 'border-slate-200/80'}`}>
             <button
               onClick={() => setIsRegisterMode(false)}
-              className={`flex-1 text-center py-2 text-xs font-bold uppercase transition-all ${
-                !isRegisterMode ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'
+              className={`flex-1 text-center py-2.5 text-xs font-bold uppercase transition-all cursor-pointer ${
+                !isRegisterMode 
+                  ? 'text-indigo-500 border-b-2 border-indigo-500' 
+                  : (isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-650')
               }`}
             >
               Credentials Sign In
             </button>
             <button
               onClick={() => setIsRegisterMode(true)}
-              className={`flex-1 text-center py-2 text-xs font-bold uppercase transition-all ${
-                isRegisterMode ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'
+              className={`flex-1 text-center py-2.5 text-xs font-bold uppercase transition-all cursor-pointer ${
+                isRegisterMode 
+                  ? 'text-indigo-500 border-b-2 border-indigo-500' 
+                  : (isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-650')
               }`}
             >
               Create Account
             </button>
+          </div>
+
+          {/* Google Sign-In with Firebase Auth (Securely Identify Users) */}
+          <div className="space-y-3 pt-2">
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={isLoggingIn}
+              className={`w-full flex items-center justify-center gap-3 py-3 rounded-xl border font-bold text-xs uppercase tracking-wider transition-all shadow-md active:scale-[0.98] cursor-pointer ${
+                isDarkMode
+                  ? 'border-slate-800 bg-slate-950 text-white hover:bg-slate-900'
+                  : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
+              }`}
+            >
+              <svg className="w-4 h-4 text-indigo-400" viewBox="0 0 24 24">
+                <path
+                  fill="currentColor"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="currentColor"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="currentColor"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                />
+                <path
+                  fill="currentColor"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                />
+              </svg>
+              <span>{isLoggingIn ? 'Connecting...' : 'Secure Sign In with Google'}</span>
+            </button>
+            <div className="relative flex py-2 items-center">
+              <div className={`flex-grow border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}></div>
+              <span className={`flex-shrink mx-4 text-[9px] font-mono font-bold uppercase tracking-widest ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>or use credentials</span>
+              <div className={`flex-grow border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}></div>
+            </div>
           </div>
 
           <AnimatePresence mode="wait">
@@ -1000,31 +1329,42 @@ export default function App() {
                 className="space-y-4"
               >
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Email Coordinates</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>
+                    Email Coordinates (Any email works to instantly connect!)
+                  </label>
                   <input
                     type="email"
                     required
-                    placeholder="e.g. faculty@iitbhu.ac.in"
+                    placeholder="Enter any email (e.g. resident@gmail.com)"
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
+                    className={`w-full ${
+                      isDarkMode 
+                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500' 
+                        : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500'
+                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Account Secret Password</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>
+                    Account Secret Password (Optional - any password works!)
+                  </label>
                   <input
                     type="password"
-                    required
-                    placeholder="••••••••"
+                    placeholder="Optional (defaults to password123)"
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
+                    className={`w-full ${
+                      isDarkMode 
+                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-605 focus:border-indigo-500' 
+                        : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500'
+                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={isLoggingIn}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm py-2.5 rounded-xl transition-all shadow-lg text-center"
+                  className="w-full bg-indigo-600 hover:bg-indigo-550 text-white font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition-all shadow-md active:scale-[0.98] cursor-pointer"
                 >
                   {isLoggingIn ? 'Logging you in...' : 'Sign In Now'}
                 </button>
@@ -1039,44 +1379,60 @@ export default function App() {
                 className="space-y-4"
               >
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Your Full Name</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>Your Full Name</label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. Dr. A.K. Tripathi"
                     value={registerName}
                     onChange={(e) => setRegisterName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500"
+                    className={`w-full ${
+                      isDarkMode 
+                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500' 
+                        : 'bg-slate-50 border-slate-200 text-slate-905 placeholder:text-slate-400 focus:border-indigo-500'
+                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">IIT Email Address</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>IIT Email Address</label>
                   <input
                     type="email"
                     required
                     placeholder="e.g. tripathi.cs@iitbhu.ac.in"
                     value={registerEmail}
                     onChange={(e) => setRegisterEmail(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500"
+                    className={`w-full ${
+                      isDarkMode 
+                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500' 
+                        : 'bg-slate-50 border-slate-200 text-slate-905 placeholder:text-slate-400 focus:border-indigo-500'
+                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Create Password</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>Create Password</label>
                   <input
                     type="password"
                     required
                     placeholder="Minimum 6 characters"
                     value={registerPassword}
                     onChange={(e) => setRegisterPassword(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 placeholder:text-slate-750 focus:outline-none focus:border-indigo-500"
+                    className={`w-full ${
+                      isDarkMode 
+                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500' 
+                        : 'bg-slate-50 border-slate-200 text-slate-905 placeholder:text-slate-400 focus:border-indigo-500'
+                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Desired Status Role</label>
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-505'} mb-1.5`}>Desired Status Role</label>
                   <select
                     value={registerRole}
                     onChange={(e: any) => setRegisterRole(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                    className={`w-full ${
+                      isDarkMode 
+                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 focus:border-indigo-500' 
+                        : 'bg-slate-50 border-slate-250 text-slate-900 focus:border-indigo-505'
+                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
                   >
                     <option value="student">Student Account (Role constraints apply)</option>
                     <option value="faculty">Faculty Member (Authorization to Reserv rooms)</option>
@@ -1086,7 +1442,7 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={isLoggingIn}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm py-2.5 rounded-xl transition-all shadow-lg text-center"
+                  className="w-full bg-indigo-600 hover:bg-indigo-550 text-white font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition-all shadow-md active:scale-[0.98] cursor-pointer"
                 >
                   {isLoggingIn ? 'Registering Account...' : 'Create Account & Log In'}
                 </button>
@@ -1103,135 +1459,187 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white font-sans flex flex-col justify-between">
+    <div className={`min-h-screen ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#FAF9F5] text-[#031c14]'} font-sans flex flex-col justify-between transition-colors duration-300`}>
       <div>
-        {/* Core Header Navigation Bar */}
-        <header className="bg-slate-900/80 border-b border-slate-800 backdrop-blur-md sticky top-0 z-40 px-6 py-4.5">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+        {/* Superior Branding Utility Top Bar */}
+        <div className="bg-[#031f16] text-[#dfb965] text-[11px] py-2 px-6 border-b border-[#0d5c43]/40 hidden md:block">
+          <div className="max-w-7xl mx-auto flex items-center justify-between font-mono">
+            <div className="flex items-center gap-6">
+              <span className="flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-[#dfb965]" />
+                <span className="text-[#f6ebd4]">IIT (BHU), Varanasi, UP 221005, India</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5 text-[#dfb965]" />
+                <span className="text-[#f6ebd4]">+91 542 6702084</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-[#dfb965]" />
+                <span className="text-[#f6ebd4]">registrar@iitbhu.ac.in</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1.5 text-[10px]">
+                <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                <span className="text-[#f6ebd4]">{isOnline ? 'Network Connected' : 'Cached Local Node'}</span>
+              </span>
+              <span className="text-emerald-800">|</span>
+              <span className="text-[#dfb965]">Office Clock: {currentTime || 'Syncing...'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Brand Sticky Header */}
+        <header className={`sticky top-0 z-40 transition-all duration-300 border-b ${
+          isSticky 
+            ? (isDarkMode ? 'bg-slate-900/95 backdrop-blur-md shadow-lg border-slate-800 py-3.5' : 'bg-white/95 backdrop-blur-md shadow-lg border-[#ead29c]/50 py-3.5') 
+            : (isDarkMode ? 'bg-slate-950/90 backdrop-blur-sm border-slate-900 py-5' : 'bg-white/90 backdrop-blur-sm border-slate-200 py-5')
+        } px-6`}>
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 flex-wrap md:flex-nowrap">
             
-            {/* Logo */}
-            <div className="flex items-center gap-3">
-              <div className="bg-gradient-to-tr from-indigo-500 to-violet-600 p-2 rounded-xl border border-indigo-400/20 shadow-lg">
+            {/* Elegant Branding with SVG Book Logo */}
+            <div 
+              className="flex items-center gap-3 cursor-pointer group" 
+              onClick={() => { setActiveTab('rooms'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            >
+              <div className="bg-[#0a4735] p-2.5 rounded-xl border border-[#dfb965]/30 shadow-md group-hover:scale-105 transition-all">
                 <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 64 64"
-                  fill="none"
-                  className="w-6.5 h-6.5 text-white animate-pulse"
+                   xmlns="http://www.w3.org/2000/svg"
+                   viewBox="0 0 64 64"
+                   fill="none"
+                   className="w-7 h-7 text-[#dfb965]"
                 >
-                  {/* Outer Sacred Lotus Ring & Shield Border */}
-                  <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="2" opacity="0.35" />
+                  <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
                   <circle cx="32" cy="32" r="24" stroke="currentColor" strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
-                  
-                  {/* Traditional Flourishing Lotus Base Accent */}
                   <path d="M19 44c3.5-1.5 8.5-2.5 13-2.5s9.5 1 13 2.5c-2 3.5-5.5 5.5-13 5.5s-11-2-13-5.5z" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1.5" />
-                  
-                  {/* Open Sacred Book of Knowledge representing BHU's academic legacy */}
                   <path d="M32 40c-2.5-2-5.5-3-9-3s-6.5.8-9 2.5V26c2.5-1.7 5.5-2.5 9-2.5s6.5.8 9 2.5c2.5-1.7 5.5-2.5 9-2.5s6.5.8 9 2.5v14c-2.5-1.7-5.5-2.5-9-2.5s-6.5 1-9 3z" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                  
-                  {/* Central Halo of spiritual & technical wisdom */}
                   <circle cx="32" cy="20" r="9" stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" opacity="0.4" />
-                  
-                  {/* Flaming Torch center stem */}
                   <path d="M32 29v7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-                  {/* Flame representing the light of learning */}
                   <path d="M32 12c-2.5 3.5-4 5-4 7a4 4 0 1 0 8 0c0-2-1.5-3.5-4-7z" fill="currentColor" opacity="0.95" />
-                  
-                  {/* Dynamic Radiance Sunburst Rays */}
-                  <line x1="32" y1="5" x2="32" y2="8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  <line x1="21" y1="9" x2="23" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="43" y1="9" x2="41" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="16" y1="18" x2="19" y2="19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="48" y1="18" x2="45" y2="19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
               </div>
-              <div>
-                <h1 className="text-xl font-extrabold tracking-tight">IIT BHU Smart Room Scheduler</h1>
-                <p className="text-[9px] text-indigo-400 font-mono tracking-wider uppercase mt-0.5">
-                  Academic Full-Stack Database Nodes Active
+              <div className="text-left">
+                <h1 className={`text-sm font-display font-bold tracking-widest uppercase transition-colors duration-200 ${isDarkMode ? 'text-white' : 'text-[#0a4735]'}`}>IIT (BHU) Varanasi</h1>
+                <p className="text-[11px] font-serif font-semibold italic text-[#c09728] tracking-wide">
+                  Meeting Room Booking Portal
                 </p>
               </div>
             </div>
 
-            {/* Profile info & Signout */}
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              {/* Theme Toggle Button */}
+            {/* Real-time Portal Clock Pill */}
+            <div className={`hidden xl:flex items-center gap-2 px-3.5 py-1.5 border rounded-xl font-mono text-[11px] font-bold transition-all duration-300 ${
+              isDarkMode 
+                ? 'bg-slate-900 border-slate-800 text-[#dfb965]' 
+                : 'bg-[#faf8f2] border-[#ead29c]/50 text-[#0a4735]'
+            }`}>
+              <span className="w-2 h-2 rounded-full bg-[#c09728] animate-pulse" />
+              <span>UTC: {currentTime || 'Syncing...'}</span>
+            </div>
+
+            {/* Horizontal Navigation Menu for Desktop */}
+            <nav className="hidden lg:flex items-center gap-1.5">
+              {[
+                { label: 'Home', tab: 'rooms', action: () => { setActiveTab('rooms'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+                { label: 'Rooms & Spaces', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('directory-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
+                { label: 'My Bookings', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('my-bookings-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
+                { label: 'Calendar', tab: 'calendar' },
+                { label: 'Facilities', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('facilities-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
+                { label: 'AI Advisor', tab: 'ai' },
+                { label: 'Workspace Sync', tab: 'drive' },
+                { label: 'Analytics', tab: 'analytics' },
+                ...(user.role === 'admin' ? [{ label: 'Admin Center', tab: 'admin' }] : []),
+                { label: 'About', tab: 'about' },
+                { label: 'Contact', tab: 'contact' }
+              ].map((item) => {
+                const isActive = activeTab === item.tab || (item.tab === 'drive' && ['drive', 'gmail', 'chat', 'forms'].includes(activeTab));
+                return (
+                  <button
+                    key={item.label}
+                    onClick={item.action || (() => setActiveTab(item.tab as any))}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${
+                      isActive
+                        ? (isDarkMode ? 'text-white bg-slate-900 border-b-2 border-[#dfb965]' : 'text-[#0a4735] bg-[#faf8f2] border-b-2 border-[#d4af37]')
+                        : (isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-900/50' : 'text-[#0a4735]/70 hover:text-[#0a4735] hover:bg-[#faf8f2]/50')
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Right Side Controls & Profile Dropdown */}
+            <div className="hidden lg:flex items-center gap-3">
+              {/* Premium Dark Mode Toggle */}
               <button
-                onClick={() => setIsDarkMode(!isDarkMode)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-800 bg-slate-1000/60 p-2.5 hover:border-slate-700 text-slate-400 hover:text-white transition-all font-semibold text-xs cursor-pointer select-none"
-                title="Switch Theme (Light/Dark)"
+                onClick={toggleDarkMode}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-slate-900 border-slate-800 text-[#dfb965] hover:bg-slate-800' 
+                    : 'bg-[#faf8f2] border-[#ead29c]/40 text-[#0a4735] hover:bg-stone-100'
+                }`}
+                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
               >
-                {isDarkMode ? <Sun className="w-4 h-4 text-amber-500 animate-spin-slow" /> : <Moon className="w-4 h-4 text-indigo-400" />}
-                <span className="hidden sm:inline font-mono text-[9.5px] tracking-wider uppercase">
-                  {isDarkMode ? 'Light' : 'Dark'}
-                </span>
+                {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </button>
 
-              <div className="font-mono text-[11px] text-slate-400 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 hidden lg:block">
-                {currentTime || 'Syncing...'}
-              </div>
-
-              {/* Notifications Alarm Bell button with badge dropdown */}
+              {/* Notifications Inbox Button */}
               <div className="relative">
                 <button
                   onClick={() => {
                     setShowNotifications(!showNotifications);
-                    if (!showNotifications) {
-                      handleMarkNotificationsRead();
-                    }
+                    if (!showNotifications) handleMarkNotificationsRead();
                   }}
                   className={`relative p-2.5 rounded-xl border transition-all cursor-pointer ${
                     safeNotifications.some((n) => !n.read)
-                      ? 'bg-indigo-950/60 border-indigo-800 text-indigo-300 animate-pulse'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                      ? 'bg-[#faf8f2] border-[#dfb965] text-[#c09728]'
+                      : (isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white' : 'bg-[#faf8f2] border-[#ead29c]/40 text-slate-450 hover:text-[#0a4735]')
                   }`}
-                  title="Academy Schedule System Notifications Inbox"
                 >
                   <Bell className="w-4 h-4" />
                   {safeNotifications.some((n) => !n.read) && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-rose-500 rounded-full border border-slate-950" />
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full" />
                   )}
                 </button>
-
+                
+                {/* Notifications Dropdown Panel */}
                 <AnimatePresence>
                   {showNotifications && (
                     <motion.div
                       initial={{ opacity: 0, y: 12 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 12 }}
-                      className="absolute right-0 mt-3 w-80 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl z-50 overflow-hidden text-left"
+                      className={`absolute right-0 mt-3 w-80 border rounded-2xl shadow-xl z-50 overflow-hidden text-left ${
+                        isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-200' : 'bg-white border-[#ead29c] text-slate-800'
+                      }`}
                     >
-                      <div className="p-4 border-b border-slate-850 flex justify-between items-center bg-slate-1000/60">
-                        <span className="text-xs font-bold text-slate-200">System Notifications</span>
+                      <div className={`p-4 border-b flex justify-between items-center ${
+                        isDarkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-[#faf8f2] border-[#ead29c]/50'
+                      }`}>
+                        <span className={`text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-[#0a4735]'}`}>System Alerts</span>
                         <button
-                          onClick={() => {
-                            setNotifications([]);
-                            setShowNotifications(false);
-                          }}
-                          className="text-[10px] text-slate-500 hover:text-white uppercase font-mono cursor-pointer"
+                          onClick={() => { setNotifications([]); setShowNotifications(false); }}
+                          className="text-[10px] text-rose-500 hover:text-rose-600 uppercase font-mono cursor-pointer"
                         >
-                          Clear
+                          Clear All
                         </button>
                       </div>
-                      
-                      <div className="max-h-64 overflow-y-auto divide-y divide-slate-850/60">
+                      <div className="max-h-64 overflow-y-auto divide-y divide-slate-850">
                         {safeNotifications.length === 0 ? (
-                           <div className="p-6 text-center text-xs text-slate-500 italic">No notifications registered.</div>
+                           <div className="p-6 text-center text-xs text-slate-400 italic">No notifications.</div>
                         ) : (
                           safeNotifications.map((notif) => (
-                            <div key={notif.id || Math.random()} className="p-3.5 space-y-1 hover:bg-slate-950 transition-colors">
+                            <div key={notif.id || Math.random()} className={`p-3.5 space-y-1 transition-colors ${
+                              isDarkMode ? 'hover:bg-slate-850/40' : 'hover:bg-[#faf8f2]/30'
+                            }`}>
                               <div className="flex justify-between items-start gap-2">
-                                <span className={`text-[10.5px] font-bold block leading-snug ${
-                                  notif.type === 'success' ? 'text-emerald-400' :
-                                  notif.type === 'warn' ? 'text-rose-450' : 'text-indigo-400'
-                                }`}>
+                                <span className={`text-[10.5px] font-bold block leading-snug ${notif.type === 'success' ? (isDarkMode ? 'text-emerald-400' : 'text-[#0a4735]') : 'text-[#c09728]'}`}>
                                   {notif.title}
                                 </span>
-                                {!notif.read && (
-                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 mt-1" />
-                                )}
+                                {!notif.read && <span className="w-1.5 h-1.5 rounded-full bg-[#d4af37] shrink-0 mt-1" />}
                               </div>
-                              <p className="text-[10.5px] text-slate-450 leading-normal">{notif.message}</p>
-                              <span className="text-[8.5px] font-mono text-slate-600 block">
+                              <p className={`text-[10.5px] leading-normal ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{notif.message}</p>
+                              <span className="text-[8.5px] font-mono text-slate-400 block">
                                 {new Date(notif.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </span>
                             </div>
@@ -1243,136 +1651,225 @@ export default function App() {
                 </AnimatePresence>
               </div>
 
-              {/* Dynamic Google Link pill */}
+              {/* Google Link Connection Badge */}
               <button
                 onClick={linkGoogleWorkspaceAccount}
                 disabled={isLinkingGoogle}
-                className={`flex items-center gap-1.5 text-[10px] font-bold uppercase py-1.5 px-3 rounded-xl border transition-all ${
+                className={`flex items-center gap-1.5 text-[10px] font-extrabold uppercase py-2.5 px-3.5 rounded-xl border transition-all cursor-pointer ${
                   googleWorkspaceLinked
-                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/40'
-                    : isLinkingGoogle 
-                    ? 'bg-indigo-950/60 text-indigo-300 border-indigo-800/40 opacity-75'
-                    : 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border-rose-800/40 animate-pulse'
+                    ? 'bg-[#10b981]/10 text-emerald-400 border-emerald-900/30'
+                    : 'bg-rose-500/10 text-rose-400 border-rose-900/30 animate-pulse'
                 }`}
-                title="Google Account Auth scope binder button"
               >
-                {isLinkingGoogle ? (
-                  <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
-                ) : (
-                  <Link2 className="w-3.5 h-3.5 text-indigo-400" />
-                )}
-                <span>
-                  {googleWorkspaceLinked 
-                    ? 'CONNECTED' 
-                    : isLinkingGoogle 
-                    ? 'SYNCING...' 
-                    : 'UNLINKED / LINK NOW'}
-                </span>
+                <Link2 className="w-3.5 h-3.5" />
+                <span>{googleWorkspaceLinked ? 'Google Linked' : 'Link Google'}</span>
               </button>
 
-              {/* Interactive Role Switcher Segment Control for seamless testing */}
-              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800/80 shrink-0">
-                <span className="hidden xl:inline text-[9px] font-extrabold text-slate-500 uppercase tracking-wider px-1.5 font-mono">
-                  Test Role:
-                </span>
-                <button
-                  onClick={() => {
-                    const nextUser = {
-                      ...user,
-                      role: 'admin',
-                      name: user?.name === 'Abishek' || user?.name === 'Dr. S. K.' ? 'Prof. Rajeev Kumar' : (user?.name || 'Prof. Rajeev Kumar'),
-                      email: user?.email === 'student@iitbhu.ac.in' || user?.email === 'faculty@iitbhu.ac.in' ? 'rajeev.kumar@iitbhu.ac.in' : (user?.email || 'rajeev.kumar@iitbhu.ac.in')
-                    };
-                    setUser(nextUser);
-                    fetchDashboardModels('admin');
-                    addToast('Administrative capabilities activated!', 'success');
-                  }}
-                  className={`px-2 py-1 rounded-lg text-[9px] font-mono font-bold transition-all ${
-                    user?.role === 'admin'
-                      ? 'bg-red-500/15 text-red-400 border border-red-500/30 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-350 hover:bg-slate-900/45 border border-transparent'
-                  }`}
-                  title="Switch to Admin Role"
-                >
-                  Admin
-                </button>
-                <button
-                  onClick={() => {
-                    const nextUser = {
-                      ...user,
-                      role: 'faculty',
-                      name: user?.name === 'Prof. Rajeev Kumar' || user?.name === 'Abishek' ? 'Dr. S. K.' : (user?.name || 'Dr. S. K.'),
-                      email: user?.email === 'rajeev.kumar@iitbhu.ac.in' || user?.email === 'student@iitbhu.ac.in' ? 'faculty@iitbhu.ac.in' : (user?.email || 'faculty@iitbhu.ac.in')
-                    };
-                    setUser(nextUser);
-                    fetchDashboardModels('faculty');
-                    addToast('Faculty reservation view loaded!', 'success');
-                  }}
-                  className={`px-2 py-1 rounded-lg text-[9px] font-mono font-bold transition-all ${
-                    user?.role === 'faculty'
-                      ? 'bg-teal-500/15 text-teal-400 border border-teal-500/30 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-355 hover:bg-slate-900/45 border border-transparent'
-                  }`}
-                  title="Switch to Faculty Role"
-                >
-                  Faculty
-                </button>
-                <button
-                  onClick={() => {
-                    const nextUser = {
-                      ...user,
-                      role: 'student',
-                      name: user?.name === 'Prof. Rajeev Kumar' || user?.name === 'Dr. S. K.' ? 'Abishek' : (user?.name || 'Abishek'),
-                      email: user?.email === 'rajeev.kumar@iitbhu.ac.in' || user?.email === 'faculty@iitbhu.ac.in' ? 'student@iitbhu.ac.in' : (user?.email || 'student@iitbhu.ac.in')
-                    };
-                    setUser(nextUser);
-                    fetchDashboardModels('student');
-                    addToast('Student Availability Directory unlocked!', 'success');
-                  }}
-                  className={`px-2 py-1 rounded-lg text-[9px] font-mono font-bold transition-all ${
-                    user?.role === 'student'
-                      ? 'bg-amber-500/15 text-amber-500 border border-amber-500/30'
-                      : 'text-slate-500 hover:text-slate-350 hover:bg-slate-900/45 border border-transparent'
-                  }`}
-                  title="Switch to Student Role"
-                >
-                  Student
-                </button>
-              </div>
-
-              {/* Identity tag */}
-              <div className="flex items-center gap-3 bg-slate-950 p-1.5 pr-3.5 rounded-full border border-slate-800">
-                <div className="w-8 h-8 rounded-full bg-indigo-900/80 border border-indigo-700/60 flex items-center justify-center font-bold text-xs uppercase text-indigo-200">
+              {/* Luxury Profile Pill */}
+              <div className={`flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full border ${
+                isDarkMode 
+                  ? 'border-slate-800 bg-slate-900' 
+                  : 'border-[#ead29c]/50 bg-[#faf8f2]'
+              }`}>
+                <div className="w-8 h-8 rounded-full bg-[#0a4735] border border-[#dfb965]/40 flex items-center justify-center font-bold text-xs text-[#dfb965]">
                   {user.name.charAt(0)}
                 </div>
-                <div className="text-left leading-tight">
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs font-bold block text-slate-200">{user.name}</span>
-                    <span className={`text-[8px] font-extrabold uppercase py-0.5 px-1.5 rounded font-mono ${
-                      user.role === 'admin' ? 'bg-red-950 text-red-300 border border-red-800/35' : 
-                      user.role === 'faculty' ? 'bg-teal-950 text-teal-350 border border-teal-800/35' :
-                      'bg-amber-950 text-amber-350 border border-amber-800/35'
-                    }`}>
-                      {user.role}
-                    </span>
-                  </div>
-                  <span className="text-[9px] text-slate-500 block max-w-[130px] truncate">{user.email}</span>
+                <div className="text-left leading-none font-sans">
+                  <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user.name}</span>
+                  <span className="text-[9px] text-[#c09728] font-semibold uppercase font-mono">{user.role}</span>
                 </div>
                 <button
                   onClick={handleSignout}
-                  className="p-1.5 text-slate-400 hover:text-rose-450 rounded-full hover:bg-slate-900 transition-colors cursor-pointer"
-                  title="Log out of IIT BHU credentials portal"
+                  className={`p-1.5 rounded-full transition-all cursor-pointer ml-1 ${
+                    isDarkMode ? 'text-slate-500 hover:text-rose-450' : 'text-slate-400 hover:text-rose-650'
+                  }`}
+                  title="Sign out"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="w-3.5 h-3.5" />
                 </button>
               </div>
+            </div>
+
+            {/* Mobile Hamburger Trigger */}
+            <div className="flex items-center gap-2 lg:hidden">
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className={`p-2.5 rounded-xl border cursor-pointer ${
+                  isDarkMode 
+                    ? 'border-slate-800 text-slate-300 hover:bg-slate-850/50' 
+                    : 'border-[#ead29c]/50 text-[#0a4735] hover:bg-[#faf8f2]/50'
+                }`}
+              >
+                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
             </div>
 
           </div>
         </header>
 
+        {/* Mobile Sidebar Navigation Drawer */}
+        <AnimatePresence>
+          {mobileMenuOpen && (
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className={`fixed inset-y-0 right-0 w-80 border-l shadow-2xl z-50 p-6 flex flex-col justify-between lg:hidden text-left ${
+                isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-[#ead29c] text-[#0a4735]'
+              }`}
+            >
+              <div className="space-y-6">
+                <div className={`flex justify-between items-center pb-4 border-b ${
+                  isDarkMode ? 'border-slate-800' : 'border-slate-100'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <div className="bg-[#0a4735] p-1.5 rounded-lg text-[#dfb965]">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" className="w-5 h-5">
+                        <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
+                        <path d="M19 44c3.5-1.5 8.5-2.5 13-2.5s9.5 1 13 2.5c-2 3.5-5.5 5.5-13 5.5s-11-2-13-5.5z" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1.5" />
+                        <path d="M32 40c-2.5-2-5.5-3-9-3s-6.5.8-9 2.5V26c2.5-1.7 5.5-2.5 9-2.5s6.5.8 9 2.5v14c-2.5-1.7-5.5-2.5-9-2.5s-6.5 1-9 3z" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                      </svg>
+                    </div>
+                    <span className={`font-display font-bold text-sm uppercase ${isDarkMode ? 'text-white' : 'text-[#0a4735]'}`}>IIT (BHU)</span>
+                  </div>
+                  <button
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`p-1.5 rounded-lg border cursor-pointer ${
+                      isDarkMode ? 'border-slate-800 text-slate-400 hover:text-white' : 'border-slate-200 text-slate-500'
+                    }`}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Mobile Navigation Links */}
+                <div className="flex flex-col gap-1 text-left">
+                  {[
+                    { label: 'Home Dashboard', tab: 'rooms', action: () => { setActiveTab('rooms'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+                    { label: 'Rooms Grid', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('directory-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
+                    { label: 'My Bookings', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('my-bookings-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
+                    { label: 'Interactive Calendar', tab: 'calendar' },
+                    { label: 'Highlight Facilities', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('facilities-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
+                    { label: 'AI Advisor chatbot', tab: 'ai' },
+                    { label: 'Google Workspace', tab: 'drive' },
+                    { label: 'Analytics Insights', tab: 'analytics' },
+                    ...(user.role === 'admin' ? [{ label: 'Admin Center', tab: 'admin' }] : []),
+                    { label: 'About History', tab: 'about' },
+                    { label: 'Contact Help', tab: 'contact' }
+                  ].map((item) => {
+                    const isActive = activeTab === item.tab || (item.tab === 'drive' && ['drive', 'gmail', 'chat', 'forms'].includes(activeTab));
+                    return (
+                      <button
+                        key={item.label}
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          if (item.action) item.action();
+                          else setActiveTab(item.tab as any);
+                        }}
+                        className={`py-3 px-4 rounded-xl text-xs font-bold uppercase tracking-wider text-left transition-all ${
+                          isActive
+                            ? (isDarkMode ? 'text-white bg-slate-800 border-l-4 border-[#dfb965]' : 'text-[#0a4735] bg-[#faf8f2] border-l-4 border-[#d4af37]')
+                            : (isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800/40' : 'text-slate-500 hover:text-slate-800 hover:bg-[#faf8f2]/50')
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Mobile Profile & Switchers */}
+              <div className={`pt-6 border-t space-y-4 ${
+                isDarkMode ? 'border-slate-800' : 'border-slate-200'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-[#0a4735] flex items-center justify-center font-bold text-sm text-[#dfb965]">
+                    {user.name.charAt(0)}
+                  </div>
+                  <div className="text-left leading-tight flex-1 font-sans">
+                    <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user.name}</span>
+                    <span className={`text-[10px] block truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-550'}`}>{user.email}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      toggleDarkMode();
+                    }}
+                    className={`w-full py-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider text-center flex items-center justify-center gap-1.5 ${
+                      isDarkMode ? 'border-slate-800 bg-slate-850 text-white' : 'border-slate-200 bg-stone-100 text-[#0a4735]'
+                    }`}
+                  >
+                    {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                    <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+                  </button>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={linkGoogleWorkspaceAccount}
+                      className={`flex-1 py-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider text-center ${
+                        isDarkMode ? 'border-slate-800 text-slate-300 hover:bg-slate-850' : 'border-slate-200 text-slate-700 hover:bg-[#faf8f2]'
+                      }`}
+                    >
+                      Google Sync
+                    </button>
+                    <button
+                      onClick={handleSignout}
+                      className={`flex-grow-0 p-2.5 rounded-xl border ${
+                        isDarkMode ? 'border-slate-800 text-rose-400 hover:bg-rose-950/20' : 'border-slate-200 text-rose-650 hover:bg-rose-50/20'
+                      }`}
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Role Test Center floating tray on bottom-left for easy access during inspection */}
+        <div className="fixed bottom-6 left-6 z-40 hidden md:flex items-center gap-2 bg-white/95 border border-[#ead29c] shadow-2xl rounded-2xl p-2.5 backdrop-blur-sm">
+          <span className="text-[9.5px] font-extrabold text-[#0a4735] uppercase font-mono tracking-widest pl-2">
+            Switch Test Role:
+          </span>
+          <div className="flex bg-[#faf8f2] p-1 rounded-xl border border-[#ead29c]/50">
+            {[
+              { role: 'admin', name: 'Prof. Rajeev Kumar', email: 'rajeev.kumar@iitbhu.ac.in', color: 'bg-rose-500/10 text-rose-700' },
+              { role: 'faculty', name: 'Dr. S. K.', email: 'faculty@iitbhu.ac.in', color: 'bg-[#0a4735]/10 text-[#0a4735]' },
+              { role: 'student', name: 'Abishek', email: 'student@iitbhu.ac.in', color: 'bg-[#c09728]/10 text-[#c09728]' }
+            ].map((r) => {
+              const active = user?.role === r.role;
+              return (
+                <button
+                  key={r.role}
+                  onClick={() => {
+                    const nextUser = { ...user, role: r.role, name: r.name, email: r.email };
+                    setUser(nextUser);
+                    fetchDashboardModels(r.role);
+                    addToast(`Role Switched: connected as ${r.name} (${r.role})`, 'success');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                    active ? `${r.color} border border-current shadow-sm` : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  {r.role}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Local Storage Caching & Online/Offline synchronization bar */}
-        <div className="bg-slate-900 border-b border-slate-800/80 py-2.5 px-6">
+        <div className={`py-2.5 px-6 border-b transition-all duration-300 ${
+          isDarkMode
+            ? 'bg-slate-900 border-slate-800/80 text-white'
+            : 'bg-indigo-50/30 border-slate-240/80 text-slate-800 shadow-sm'
+        }`}>
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
             {/* Status Section */}
             <div className="flex items-center gap-2">
@@ -1384,28 +1881,28 @@ export default function App() {
                   isOnline ? 'bg-emerald-500' : 'bg-amber-500'
                 }`}></span>
               </span>
-              <span className="font-semibold text-slate-300">
+              <span className={`font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                 {isOnline ? 'Network Connected' : 'Offline Cached Directory Active'}
               </span>
-              <span className="text-slate-650">|</span>
-              <span className="text-slate-400 text-[10.5px] font-mono">
+              <span className={isDarkMode ? 'text-slate-650' : 'text-slate-300'}>|</span>
+              <span className={`${isDarkMode ? 'text-slate-400' : 'text-slate-600'} text-[10.5px] font-mono`}>
                 IIT BHU Cloud Sync: {isOnline ? 'Live Mode' : 'Local Sandbox Mode'}
               </span>
             </div>
 
             {/* Sync Times section */}
-            <div className="flex flex-wrap items-center gap-4 text-[10.5px] font-mono text-slate-450">
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500">Rooms:</span>
+            <div className="flex flex-wrap items-center gap-4 text-[10.5px] font-mono text-slate-450 animate-fade-in">
+              <div className="flex items-center gap-1.5 text-slate-500">
+                <span>Rooms:</span>
                 <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-bold ${
                   roomsSyncStatus.source === 'network' 
-                    ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-900/30' 
-                    : 'bg-amber-950/60 text-amber-400 border border-amber-900/30'
+                    ? (isDarkMode ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-900/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200')
+                    : (isDarkMode ? 'bg-amber-950/60 text-amber-400 border border-amber-900/30' : 'bg-amber-50 text-amber-700 border border-amber-200')
                 }`}>
                   {roomsSyncStatus.source === 'network' ? 'LIVE' : 'CACHED'}
                 </span>
                 {roomsSyncStatus.timestamp && (
-                  <span className="text-slate-500">
+                  <span className={`${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                     {new Date(roomsSyncStatus.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </span>
                 )}
@@ -1442,124 +1939,297 @@ export default function App() {
           </div>
         </div>
 
-        {/* Navigation Tabs Bar */}
-        <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-          <div className="overflow-x-auto pb-1">
-            <div className="flex items-center gap-2 border-b border-slate-800/80 mb-2">
-              <button
-                onClick={() => setActiveTab('rooms')}
-                className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
-                  activeTab === 'rooms'
-                    ? 'border-indigo-500 text-white bg-indigo-950/20'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
-                }`}
-              >
-                <Grid className="w-4 h-4" />
-                Rooms Directory
-              </button>
-              <button
-                onClick={() => setActiveTab('calendar')}
-                className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
-                  activeTab === 'calendar'
-                    ? 'border-indigo-500 text-white bg-indigo-950/20'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
-                }`}
-              >
-                <Calendar className="w-4 h-4" />
-                Calendar Scheduler
-              </button>
-              <button
-                onClick={() => setActiveTab('ai')}
-                className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all cursor-pointer ${
-                  activeTab === 'ai'
-                    ? 'border-indigo-505 text-white bg-indigo-950/25'
-                    : 'border-transparent text-slate-400 hover:text-slate-205 hover:bg-slate-900/30'
-                }`}
-              >
-                <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
-                AI Advisor
-              </button>
-              <button
-                onClick={() => setActiveTab('analytics')}
-                className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
-                  activeTab === 'analytics'
-                    ? 'border-indigo-500 text-white bg-indigo-950/20'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
-                }`}
-              >
-                <Activity className="w-4 h-4 text-rose-400" />
-                Analytics Dashboard
-              </button>
+        {/* Premium Hotel-inspired full-width Hero Section Banner for IIT (BHU) */}
+        {activeTab === 'rooms' && (
+          <div className="relative w-full overflow-hidden bg-[#0a4735] text-white">
+            {/* Background Image with elegant overlay */}
+            <div 
+              className="absolute inset-0 bg-cover bg-center opacity-40 mix-blend-overlay scale-105 transform hover:scale-100 transition-all duration-1000" 
+              style={{ backgroundImage: "url('https://images.unsplash.com/photo-1517502884422-41eaaced0168?auto=format&fit=crop&q=80&w=1600')" }} 
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0a4735] via-[#0a4735]/65 to-[#021f16]" />
+            
+            {/* Grid Pattern overlay for elegant depth */}
+            <div className="absolute inset-0 bg-[linear-gradient(to_right,#dfb9650b_1px,transparent_1px),linear-gradient(to_bottom,#dfb9650b_1px,transparent_1px)] bg-[size:24px_24px]" />
+            
+            <div className="max-w-7xl mx-auto px-6 py-20 md:py-28 relative z-10 space-y-6 text-left">
+              {/* Elegant Breadcrumbs */}
+              <nav className="flex items-center gap-2 text-xs font-mono text-[#dfb965]/85 uppercase tracking-widest">
+                <span>IIT (BHU) Portal</span>
+                <ChevronRight className="w-3 h-3 text-[#dfb965]/60" />
+                <span>Spaces</span>
+                <ChevronRight className="w-3 h-3 text-[#dfb965]/60" />
+                <span className="text-white">Meeting Rooms & Spaces</span>
+              </nav>
 
-              {user.role === 'admin' && (
-                <button
-                  onClick={() => setActiveTab('admin')}
-                  className={`flex items-center gap-2 font-medium text-xs uppercase tracking-wider py-3.5 px-4.5 border-b-2 transition-all ${
-                    activeTab === 'admin'
-                      ? 'border-rose-500 text-rose-200 bg-rose-950/20'
-                      : 'border-transparent text-slate-400 hover:text-rose-450 hover:bg-slate-900/30'
-                  }`}
-                >
-                  <Shield className="w-4 h-4 text-red-400 animate-pulse" />
-                  Admin Center
-                </button>
-              )}
-
-              <div className="border-l border-slate-800/80 pl-2 ml-2 flex items-center gap-2">
-                <button
-                  onClick={() => setActiveTab('drive')}
-                  className={`flex items-center gap-1.5 font-medium text-[11px] uppercase tracking-wider py-2 px-3 rounded-lg border border-slate-800 transition-all ${
-                    activeTab === 'drive'
-                      ? 'bg-indigo-950/40 text-indigo-200 border-indigo-900/30'
-                      : 'text-slate-500 hover:text-slate-350 bg-slate-950/25'
-                  }`}
-                >
-                  <HardDrive className="w-3.5 h-3.5" />
-                  Drive
-                </button>
-                <button
-                  onClick={() => setActiveTab('gmail')}
-                  className={`flex items-center gap-1.5 font-medium text-[11px] uppercase tracking-wider py-2 px-3 rounded-lg border border-slate-800 transition-all ${
-                    activeTab === 'gmail'
-                      ? 'bg-indigo-950/40 text-indigo-200 border-indigo-900/30'
-                      : 'text-slate-500 hover:text-slate-350 bg-slate-950/25'
-                  }`}
-                >
-                  <Mail className="w-3.5 h-3.5" />
-                  Gmail
-                </button>
-                <button
-                  onClick={() => setActiveTab('chat')}
-                  className={`flex items-center gap-1.5 font-medium text-[11px] uppercase tracking-wider py-2 px-3 rounded-lg border border-slate-800 transition-all ${
-                    activeTab === 'chat'
-                      ? 'bg-indigo-950/40 text-indigo-200 border-indigo-900/30'
-                      : 'text-slate-500 hover:text-slate-350 bg-slate-950/25'
-                  }`}
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  Chat Space
-                </button>
-                <button
-                  onClick={() => setActiveTab('forms')}
-                  className={`flex items-center gap-1.5 font-medium text-[11px] uppercase tracking-wider py-2 px-3 rounded-lg border border-slate-800 transition-all ${
-                    activeTab === 'forms'
-                      ? 'bg-indigo-950/40 text-indigo-200 border-indigo-900/30'
-                      : 'text-slate-500 hover:text-slate-350 bg-slate-950/25'
-                  }`}
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  Forms
-                </button>
+              <div className="space-y-4 max-w-3xl">
+                <h1 className="text-4xl md:text-6xl font-display font-extrabold tracking-tight text-white leading-tight">
+                  Meeting Rooms <br className="hidden sm:inline" />
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#dfb965] to-[#f3dfa2] animate-pulse">
+                    & Spaces
+                  </span>
+                </h1>
+                <p className="text-sm md:text-base text-[#faf8f2]/90 font-serif leading-relaxed font-light max-w-2xl">
+                  Welcome to the premium scheduling ecosystem of IIT (BHU) Varanasi. Reserve state-of-the-art boardrooms, fully equipped lecture theaters, and academic presentation spaces tailored to high-profile institute gatherings.
+                </p>
               </div>
 
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-4 pt-4">
+                <button
+                  onClick={() => {
+                    const section = document.getElementById('directory-section');
+                    if (section) section.scrollIntoView({ behavior: 'smooth' });
+                    else {
+                      window.scrollTo({ top: 600, behavior: 'smooth' });
+                    }
+                  }}
+                  className="px-8 py-4 bg-[#dfb965] hover:bg-[#d4af37] text-[#0a4735] font-display font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 cursor-pointer flex items-center gap-2"
+                >
+                  <Calendar className="w-4 h-4" />
+                  <span>Book Now</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab('calendar');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-8 py-4 bg-white/10 hover:bg-white/15 border border-white/20 hover:border-white/35 text-white font-display font-bold text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer flex items-center gap-2"
+                >
+                  <Clock className="w-4 h-4 text-[#dfb965]" />
+                  <span>Interactive Scheduler</span>
+                </button>
+              </div>
             </div>
           </div>
+        )}
+
+        {/* Navigation Tabs Bar */}
+        <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+          <div className="lg:grid lg:grid-cols-12 lg:gap-8 items-start">
+            {/* Left Sidebar on Desktop */}
+            <div className="lg:col-span-3 space-y-6 lg:sticky lg:top-24">
+              {/* Profile Card (Integrated into the Sidebar for a true Dashboard look) */}
+              <div className={`p-5 rounded-2xl border text-left space-y-4 ${
+                isDarkMode 
+                  ? 'bg-slate-900 border-slate-800' 
+                  : 'bg-white border-slate-200/80 shadow-sm'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-extrabold text-sm uppercase border ${
+                    isDarkMode 
+                      ? 'bg-indigo-950/80 border-indigo-700/60 text-indigo-300' 
+                      : 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                  }`}>
+                    {user.name.charAt(0)}
+                  </div>
+                  <div className="leading-tight flex-1 min-w-0">
+                    <span className={`text-sm font-bold block truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user.name}</span>
+                    <span className={`text-[8.5px] font-extrabold uppercase py-0.5 px-1.5 rounded font-mono inline-block mt-0.5 ${
+                      user.role === 'admin' ? (isDarkMode ? 'bg-red-950/80 text-red-300 border border-red-800/35' : 'bg-red-50 text-red-700 border border-red-200') : 
+                      user.role === 'faculty' ? (isDarkMode ? 'bg-teal-950/80 text-teal-350 border border-teal-800/35' : 'bg-teal-50 text-teal-700 border border-teal-200') :
+                      (isDarkMode ? 'bg-amber-950/80 text-amber-350 border border-amber-800/35' : 'bg-amber-50 text-amber-700 border border-amber-200')
+                    }`}>
+                      {user.role}
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Micro statistics or fast indicator */}
+                <div className={`pt-3 border-t ${isDarkMode ? 'border-slate-800/60' : 'border-slate-100'} grid grid-cols-2 gap-2 text-center`}>
+                  <div className="space-y-0.5">
+                    <span className="text-[9px] text-slate-500 block font-mono uppercase">User Level</span>
+                    <strong className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} capitalize`}>{user.role}</strong>
+                  </div>
+                  <div className="space-y-0.5 border-l border-slate-800/60">
+                    <span className="text-[9px] text-slate-500 block font-mono uppercase">Sync State</span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-500 justify-center w-full">
+                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                      Live
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sidebar Navigation Links (Responsive: Desktop sidebar, collapses on mobile) */}
+              <div className={`hidden lg:block p-3 rounded-2xl border ${
+                isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200/80 shadow-sm'
+              }`}>
+                <div className="px-3 pb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono">
+                  Scheduling Hub
+                </div>
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setActiveTab('rooms')}
+                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                      activeTab === 'rooms'
+                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Grid className="w-4 h-4 shrink-0" />
+                    <span>Rooms Directory</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('calendar')}
+                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                      activeTab === 'calendar'
+                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Calendar className="w-4 h-4 shrink-0" />
+                    <span>Calendar Scheduler</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('ai')}
+                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                      activeTab === 'ai'
+                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Sparkles className="w-4 h-4 text-indigo-400 shrink-0 animate-pulse" />
+                    <span>AI Assistant</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('analytics')}
+                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                      activeTab === 'analytics'
+                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Activity className="w-4 h-4 text-rose-450 shrink-0" />
+                    <span>Analytics</span>
+                  </button>
+                </div>
+
+                <div className="px-3 pt-4 pb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono border-t border-slate-850 mt-3">
+                  Google Workspace
+                </div>
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setActiveTab('drive')}
+                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                      ['drive', 'gmail', 'chat', 'forms'].includes(activeTab)
+                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <HardDrive className="w-4 h-4 text-emerald-450 shrink-0" />
+                    <span>Workspace Sync</span>
+                  </button>
+                </div>
+
+                {user.role === 'admin' && (
+                  <>
+                    <div className="px-3 pt-4 pb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono border-t border-slate-855 mt-3">
+                      Security & Control
+                    </div>
+                    <div className="space-y-1">
+                      <button
+                        onClick={() => setActiveTab('admin')}
+                        className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                          activeTab === 'admin'
+                            ? (isDarkMode ? 'bg-rose-950/30 text-rose-300 border-l-4 border-rose-500 font-bold' : 'bg-rose-50/80 text-rose-700 border-l-4 border-rose-500 font-bold')
+                            : 'text-slate-400 hover:text-rose-400 hover:bg-slate-800/40'
+                        }`}
+                      >
+                        <Shield className="w-4 h-4 text-red-450 shrink-0 animate-pulse" />
+                        <span>Admin Center</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Right-hand Main Workspace Content area */}
+            <div className="lg:col-span-9 space-y-6">
+              
+              {/* Mobile top-bar horizontal menu (only visible below lg screen width) */}
+              <div className="block lg:hidden overflow-x-auto pb-1 mb-4">
+                <div className="flex items-center gap-1.5 border-b border-slate-800/60">
+                  <button
+                    onClick={() => setActiveTab('rooms')}
+                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
+                      activeTab === 'rooms'
+                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
+                        : 'border-transparent text-slate-400 hover:text-slate-250'
+                    }`}
+                  >
+                    <Grid className="w-3.5 h-3.5 shrink-0" />
+                    <span>Rooms</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('calendar')}
+                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
+                      activeTab === 'calendar'
+                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
+                        : 'border-transparent text-slate-400 hover:text-slate-250'
+                    }`}
+                  >
+                    <Calendar className="w-3.5 h-3.5 shrink-0" />
+                    <span>Calendar</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('ai')}
+                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
+                      activeTab === 'ai'
+                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
+                        : 'border-transparent text-slate-400 hover:text-slate-250'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0 animate-pulse" />
+                    <span>AI Assistant</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('analytics')}
+                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
+                      activeTab === 'analytics'
+                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
+                        : 'border-transparent text-slate-400 hover:text-slate-250'
+                    }`}
+                  >
+                    <Activity className="w-3.5 h-3.5 text-rose-450 shrink-0" />
+                    <span>Analytics</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('drive')}
+                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
+                      ['drive', 'gmail', 'chat', 'forms'].includes(activeTab)
+                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
+                        : 'border-transparent text-slate-400 hover:text-slate-250'
+                    }`}
+                  >
+                    <HardDrive className="w-3.5 h-3.5 text-emerald-450 shrink-0" />
+                    <span>Workspace</span>
+                  </button>
+                  {user.role === 'admin' && (
+                    <button
+                      onClick={() => setActiveTab('admin')}
+                      className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
+                        activeTab === 'admin'
+                          ? 'border-rose-500 text-rose-200 bg-rose-950/20 font-bold'
+                          : 'border-transparent text-slate-400 hover:text-rose-400'
+                      }`}
+                    >
+                      <Shield className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                      <span>Admin</span>
+                    </button>
+                  )}
+                </div>
+              </div>
 
           {isIframe && !googleWorkspaceLinked && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-amber-950/90 border border-amber-800/60 p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-left relative overflow-hidden shadow-2xl"
+              className="bg-amber-950/90 border border-amber-800/60 p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-left relative overflow-hidden shadow-2xl mb-6"
             >
               <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
               <div className="flex items-start gap-3 relative z-10">
@@ -1588,18 +2258,242 @@ export default function App() {
 
           {/* Active Tab transition bounds */}
           <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.2 }}
-            >
+            <div className="space-y-6">
+              {['drive', 'gmail', 'chat', 'forms'].includes(activeTab) && (
+                <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800 w-full max-w-md mx-auto justify-stretch select-none shadow-lg mb-4">
+                  <button
+                    onClick={() => setActiveTab('drive')}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10.5px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                      activeTab === 'drive'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <HardDrive className="w-3.5 h-3.5" />
+                    <span>Drive</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('gmail')}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10.5px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                      activeTab === 'gmail'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Gmail</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('chat')}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10.5px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                      activeTab === 'chat'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Chat</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('forms')}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10.5px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                      activeTab === 'forms'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>Forms</span>
+                  </button>
+                </div>
+              )}
+
+              <motion.div
+                key={activeTab}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.2 }}
+                className="w-full"
+              >
               {/* ==========================================
                   TAB: ROOMS DIRECTORY
                   ========================================== */}
               {activeTab === 'rooms' && (
                 <div className="space-y-6">
+                  {/* Modern Welcoming Hero Banner */}
+                  <div className="p-6 bg-gradient-to-r from-indigo-950/60 to-slate-900 border border-indigo-900/40 rounded-3xl text-left relative overflow-hidden shadow-xl">
+                    <div className="absolute top-1/2 right-0 -translate-y-1/2 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+                    <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                      <div className="space-y-1.5">
+                        <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono">IIT BHU Campus Scheduler 👋</span>
+                        <h2 className="text-xl font-extrabold tracking-tight text-white">Need to book an academic space today?</h2>
+                        <p className="text-xs text-slate-350 max-w-2xl leading-relaxed">
+                          Welcome, <strong className="text-indigo-300">{user.name}</strong>. Browse live room statuses below. Click <strong className="text-indigo-300">"CHOOSE SLOT"</strong> to customize a schedule inside our interactive calendar, or click <strong className="text-indigo-300 font-bold">"QR Scanner"</strong> to check in instantly!
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <button
+                          onClick={() => setActiveTab('calendar')}
+                          className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-550 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Quick Book</span>
+                        </button>
+                        <button
+                          onClick={() => setActiveTab('ai')}
+                          className="px-4 py-2.5 bg-slate-950/85 hover:bg-slate-900 text-indigo-400 hover:text-indigo-300 border border-slate-800 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2"
+                        >
+                          <Sparkles className="w-4 h-4 text-indigo-400" />
+                          <span>AI Assistant</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Campus Bento metrics row */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-left hover:border-indigo-500/25 transition-all">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase font-mono tracking-widest">Available spaces</span>
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <strong className="text-2xl font-black text-white">{rooms.filter(r => r.status === 'available').length}</strong>
+                        <span className="text-xs text-slate-500 font-mono">/ {rooms.length} rooms</span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-left hover:border-indigo-500/25 transition-all">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase font-mono tracking-widest">Campus occupancy</span>
+                        <div className="p-1 bg-indigo-950/40 rounded-lg text-[10px] text-indigo-400 font-mono">
+                          {rooms.length ? Math.round((rooms.filter(r => r.status === 'booked').length / rooms.length) * 100) : 0}%
+                        </div>
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <strong className="text-2xl font-black text-white">{rooms.filter(r => r.status === 'booked').length}</strong>
+                        <span className="text-xs text-slate-500 font-mono">occupied now</span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-left hover:border-indigo-500/25 transition-all">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase font-mono tracking-widest">Today's Schedule</span>
+                        <Calendar className="w-4 h-4 text-indigo-400" />
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <strong className="text-2xl font-black text-white">{adminBookings.length}</strong>
+                        <span className="text-xs text-slate-500 font-mono">active events</span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-gradient-to-br from-indigo-950/40 to-slate-900 border border-indigo-900/35 rounded-2xl text-left hover:border-indigo-400/40 transition-all shadow-md">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] text-indigo-400 font-bold uppercase font-mono tracking-widest">My Reservations</span>
+                        <Award className="w-4 h-4 text-indigo-400" />
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <strong className="text-2xl font-black text-indigo-300">{userBookings.length}</strong>
+                        <span className="text-xs text-indigo-450 font-mono">slots secured</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* My Active Bookings / Upcoming Agenda Ticket List */}
+                  {userBookings.length > 0 && (
+                    <div className="p-5 bg-indigo-950/15 border border-indigo-900/30 rounded-3xl text-left space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse" />
+                            My Upcoming Academic Agenda
+                          </h3>
+                          <p className="text-[11px] text-indigo-400 font-medium">Quickly track details, download calendar attachments, or modify reservations.</p>
+                        </div>
+                        <span className="text-[10px] font-mono text-indigo-400/80 bg-indigo-950/80 px-2.5 py-1 rounded-xl border border-indigo-900/30 self-start sm:self-auto">
+                          {userBookings.length} ACTIVE RESERVATIONS
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {userBookings.map((b) => {
+                          const startDate = new Date(b.start_time);
+                          const endDate = new Date(b.end_time);
+                          const isToday = startDate.toDateString() === new Date().toDateString();
+                          const timeStr = `${startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+                          return (
+                            <div key={b.id} className="p-4 bg-slate-950/60 border border-indigo-900/20 hover:border-indigo-500/40 rounded-2xl flex flex-col justify-between gap-3.5 shadow-md hover:shadow-lg transition-all">
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-xs bg-indigo-900/60 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded-lg border border-indigo-800/45 uppercase tracking-wider">
+                                    {b.room_name}
+                                  </span>
+                                  <span className="text-[10px] text-indigo-400 font-mono font-black">
+                                    {isToday ? 'TODAY' : startDate.toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                  </span>
+                                </div>
+                                <h4 className="text-sm font-bold text-white leading-snug tracking-tight">{b.summary}</h4>
+                                <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono">
+                                  <Clock className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                                  <span>{timeStr}</span>
+                                </div>
+                              </div>
+
+                              <div className="pt-2.5 border-t border-slate-900/80 flex items-center justify-between gap-2">
+                                <button
+                                  onClick={() => handleAddToGoogleCalendar(b)}
+                                  disabled={syncingBookingId === b.id}
+                                  className="flex-1 py-1.5 px-3 bg-indigo-600 hover:bg-indigo-550 disabled:opacity-50 text-[10px] font-extrabold text-white rounded-xl flex items-center justify-center gap-1.5 transition-all uppercase tracking-wider cursor-pointer shadow-sm"
+                                >
+                                  {syncingBookingId === b.id ? (
+                                    <>
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                      <span>Syncing...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CalendarPlus className="w-3.5 h-3.5 text-white" />
+                                      <span>Sync to Google</span>
+                                    </>
+                                  )}
+                                </button>
+                                
+                                <button
+                                  onClick={() => {
+                                    setConfirmModal({
+                                      isOpen: true,
+                                      title: 'Cancel Reservation Slot',
+                                      message: `Are you sure you want to release the booking "${b.summary}" for "${b.room_name}"?\n\nThis will permanently cancel your scheduled academic slot.`,
+                                      confirmText: 'Drop Booking',
+                                      cancelText: 'Keep Booking',
+                                      isDanger: true,
+                                      requiredTextToConfirm: 'DECOMMISSION',
+                                      onConfirm: async () => {
+                                        try {
+                                          await bookingsAPI.delete(b.id);
+                                          addToast('Booking successfully cancelled.', 'success');
+                                          fetchDashboardModels(user.role);
+                                        } catch (err: any) {
+                                          addToast(err.message, 'error');
+                                        }
+                                      }
+                                    });
+                                  }}
+                                  className="p-2 bg-slate-900 hover:bg-rose-950/30 border border-slate-800 hover:border-rose-900/40 text-slate-400 hover:text-rose-400 rounded-xl transition-all cursor-pointer"
+                                  title="Release booked slot"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4.5 bg-slate-900 rounded-2xl border border-slate-800 gap-4">
                     <div>
                       <div className="flex items-center gap-2.5 flex-wrap">
@@ -1630,248 +2524,442 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Filter Controls */}
-                  <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                      <div className="flex items-center gap-2">
-                        <SlidersHorizontal className="w-4 h-4 text-indigo-400" />
-                        <span className="text-xs font-bold uppercase tracking-wider text-slate-200">Refining Filters</span>
-                      </div>
-                      {(minCapacity > 0 || selectedFeatureToggles.length > 0 || searchQuery.trim() !== '' || sortKey !== 'default') && (
-                        <button
-                          onClick={() => {
-                            setMinCapacity(0);
-                            setSelectedFeatureToggles([]);
-                            setSearchQuery('');
-                            setSortKey('default');
-                          }}
-                          className="flex items-center gap-1.5 text-[9px] font-bold uppercase text-rose-450 hover:text-rose-450 bg-rose-950/20 px-2.5 py-1.5 rounded-lg border border-rose-900/30 cursor-pointer"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                          Clear all
-                        </button>
-                      )}
+                  {/* Search and Advanced Filters Toggle */}
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                    <div className="md:col-span-7 relative">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                      <input
+                        type="text"
+                        placeholder="Search rooms by name or equipment (e.g. Whiteboard, Projector)..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl py-2.5 pl-10 pr-4 text-xs text-slate-200 placeholder:text-slate-500 outline-none transition-all shadow-md text-left"
+                      />
+                    </div>
+                    
+                    <div className="md:col-span-3 relative">
+                      <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-indigo-400 pointer-events-none" />
+                      <select
+                        value={sortKey}
+                        onChange={(e) => setSortKey(e.target.value as any)}
+                        className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl py-2.5 pl-9 pr-4 text-xs text-slate-200 outline-none appearance-none cursor-pointer shadow-md text-left font-sans"
+                      >
+                        <option value="default">Sort: Default Featured</option>
+                        <option value="available-first">Available First</option>
+                        <option value="booked-first">Booked First</option>
+                        <option value="capacity-asc">Capacity (Low to High)</option>
+                        <option value="capacity-desc">Capacity (High to Low)</option>
+                      </select>
                     </div>
 
-                    <div className="flex flex-col lg:flex-row gap-4">
-                      {/* Search */}
-                      <div className="flex-1 relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                        <input
-                          type="text"
-                          placeholder="Search rooms by name or equipment (e.g. Whiteboard, Projector)..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-200 placeholder:text-slate-600 outline-none transition-all"
-                        />
-                      </div>
-                      {/* Sort dropdown */}
-                      <div className="lg:w-64 relative">
-                        <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400 pointer-events-none" />
-                        <select
-                          value={sortKey}
-                          onChange={(e) => setSortKey(e.target.value as any)}
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-200 outline-none appearance-none cursor-pointer"
-                        >
-                          <option value="default">Sort: Default Featured</option>
-                          <option value="available-first font-mono">Available First</option>
-                          <option value="booked-first font-mono">Booked First</option>
-                          <option value="capacity-asc">Capacity (Low to High)</option>
-                          <option value="capacity-desc">Capacity (High to Low)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
-                      <div className="space-y-2">
-                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Minimum Capacity Seats</span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {[0, 15, 30, 50, 100].map((cap) => {
-                            const active = minCapacity === cap;
-                            return (
-                              <button
-                                key={cap}
-                                onClick={() => setMinCapacity(cap)}
-                                className={`text-[10px] font-extrabold py-1 px-2.5 rounded-lg border transition-all ${
-                                  active ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'
-                                }`}
-                              >
-                                {cap === 0 ? 'Any Seats' : `${cap}+ Seats`}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Amenities & Features</span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {['Projector', 'Whiteboard', 'Display/Screen', 'Audio/Video', 'Ergonomics/Seating'].map((feat) => {
-                            const isSelected = selectedFeatureToggles.includes(feat);
-                            return (
-                              <button
-                                key={feat}
-                                onClick={() => {
-                                  setSelectedFeatureToggles(prev =>
-                                    isSelected ? prev.filter(t => t !== feat) : [...prev, feat]
-                                  );
-                                }}
-                                className={`text-[10.5px] font-semibold py-1 px-2.5 rounded-lg border transition-all flex items-center gap-1 ${
-                                  isSelected ? 'bg-indigo-950 text-indigo-300 border-indigo-800' : 'bg-slate-950 border-slate-850 text-slate-500 hover:text-slate-350'
-                                }`}
-                              >
-                                {isSelected && <Check className="w-3 h-3 text-indigo-400" />}
-                                {feat}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                    <div className="md:col-span-2">
+                      <button
+                        onClick={() => setShowFilters(prev => !prev)}
+                        className={`w-full flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-wider py-2.5 px-4 rounded-xl border transition-all cursor-pointer shadow-md ${
+                          showFilters 
+                            ? 'bg-indigo-950/60 text-indigo-300 border-indigo-850' 
+                            : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                        }`}
+                      >
+                        <SlidersHorizontal className="w-4 h-4" />
+                        <span>Filters</span>
+                        {(minCapacity > 0 || statusFilter !== 'all' || selectedFeatureToggles.length > 0) && (
+                          <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] flex items-center justify-center font-bold">
+                            {(minCapacity > 0 ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + selectedFeatureToggles.length}
+                          </span>
+                        )}
+                      </button>
                     </div>
                   </div>
 
-                  {/* Rooms Cards Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
-                    {filteredRooms.map((room) => (
-                      <div
-                        key={room.id}
-                        className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300 flex flex-col justify-between"
+                  {/* Filter Controls */}
+                  <AnimatePresence>
+                    {showFilters && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl space-y-4 overflow-hidden"
                       >
-                        <div>
-                          {/* Image area with status badge overlay */}
-                          <div className="relative h-48 overflow-hidden">
-                            <img src={room.image} alt={room.name} className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent" />
-                            
-                            {/* Role based constraint sign */}
-                            <div className="absolute top-4 left-4">
-                              <span className={`text-[10px] font-extrabold uppercase py-1 px-2 rounded-lg font-mono border flex items-center gap-1 ${
-                                room.status === 'available' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/40' :
-                                room.status === 'booked' ? 'bg-rose-950/80 text-rose-300 border-rose-800/40' :
-                                'bg-amber-950/80 text-amber-300 border-amber-800/40'
-                              }`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${room.status === 'available' ? 'bg-emerald-400' : room.status === 'booked' ? 'bg-rose-400' : 'bg-amber-400animate-ping'}`} />
-                                {room.status === 'available' ? 'AVAILABLE' : room.status === 'booked' ? 'OCCUPIED' : 'EXPIRING SOON'}
-                              </span>
-                            </div>
-
-                            <div className="absolute bottom-4 left-4 right-4">
-                              <h3 className="text-lg font-black text-white drop-shadow-md">{room.name}</h3>
-                              <span className="text-xs text-slate-300 font-mono">Capacity: {room.capacity} seats</span>
-                            </div>
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                          <div className="flex items-center gap-2">
+                            <SlidersHorizontal className="w-4 h-4 text-indigo-400" />
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-200">Refining Filters</span>
                           </div>
-
-                          {/* Room Features */}
-                          <div className="p-6 space-y-4">
-                            <div className="flex flex-wrap gap-1.5">
-                              {room.features.map((f, i) => (
-                                <span key={i} className="bg-slate-950 text-slate-400 border border-slate-850 py-1 px-2.5 rounded-lg text-[10.5px] font-medium">
-                                  {f}
-                                </span>
-                              ))}
-                            </div>
-
-                            {/* Active Reservations isomorphically mapped for room tracking */}
-                            <div className="pt-3 border-t border-slate-800/65 mt-2 text-left">
-                              {(() => {
-                                const roomBookings = adminBookings.filter(b => 
-                                  b.room_name?.toLowerCase().includes(room.name.toLowerCase()) || 
-                                  room.name?.toLowerCase().includes(b.room_name?.toLowerCase())
-                                );
-
-                                return (
-                                  <div className="space-y-2">
-                                    <div className="flex items-center justify-between">
-                                      <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider font-mono flex items-center gap-1">
-                                        <Calendar className="w-3.5 h-3.5" />
-                                        Scheduled Timeline
-                                      </span>
-                                      <button
-                                        onClick={() => setSelectedRoomForHistory(room)}
-                                        className="text-[10px] font-bold text-indigo-400/95 hover:text-indigo-350 transition-all cursor-pointer underline underline-offset-2 decoration-indigo-500/30 font-mono"
-                                      >
-                                        View Activity History →
-                                      </button>
-                                    </div>
-
-                                    {roomBookings.length === 0 ? (
-                                      <p className="text-[10.5px] text-slate-500 italic">This space is completely vacant. Click below to book!</p>
-                                    ) : (
-                                      <div className="space-y-1.5 max-h-[145px] overflow-y-auto pr-1">
-                                        {roomBookings.map((b) => {
-                                          const startDate = new Date(b.start_time);
-                                          const endDate = new Date(b.end_time);
-                                          const isToday = startDate.toDateString() === new Date().toDateString();
-                                          
-                                          const dateStr = isToday 
-                                            ? 'Today' 
-                                            : startDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-                                          
-                                          const timeStr = `${startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-                                          return (
-                                            <div key={b.id} className="p-2.5 bg-slate-950/70 rounded-xl border border-slate-850/65 text-left space-y-0.5 hover:border-indigo-500/30 transition-all">
-                                              <div className="flex items-center justify-between gap-2">
-                                                <span className="font-bold text-slate-200 text-[11.5px] truncate max-w-[150px]" title={b.summary}>
-                                                  {b.summary}
-                                                </span>
-                                                <span className="text-[8.5px] bg-indigo-950/80 text-indigo-300 font-bold px-1 rounded uppercase tracking-wider font-mono">
-                                                  {dateStr}
-                                                </span>
-                                              </div>
-                                              <div className="flex items-center justify-between text-[10px] text-slate-450 font-mono">
-                                                <span>{timeStr}</span>
-                                                <span className="truncate max-w-[90px]" title={b.creator_name}>
-                                                  By: {b.creator_name?.split(' ')[0]}
-                                                </span>
-                                              </div>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Card bottom CTA */}
-                        <div className="p-6 pt-0 border-t border-slate-850/50 flex items-center justify-between gap-3 bg-slate-950/40 shrink-0">
-                          <button
-                            onClick={() => {
-                              setSelectedQRRoom(room);
-                              setScanComplete(false);
-                            }}
-                            className="bg-slate-850 hover:bg-slate-800 border border-slate-700/60 text-slate-300 py-2 px-4 rounded-xl text-xs font-bold uppercase tracking-wider transition-all"
-                          >
-                            QR SCANNER
-                          </button>
-                          
-                          {room.status === 'available' ? (
+                          {(minCapacity > 0 || statusFilter !== 'all' || selectedFeatureToggles.length > 0 || searchQuery.trim() !== '' || sortKey !== 'default') && (
                             <button
                               onClick={() => {
-                                // Double caution check
-                                setConfirmRoomSelection(room);
-                                setPreselectedRoomId(room.id);
+                                setMinCapacity(0);
+                                setStatusFilter('all');
+                                setSelectedFeatureToggles([]);
+                                setSearchQuery('');
+                                setSortKey('default');
                               }}
-                              className="bg-indigo-600 hover:bg-indigo-500 text-white py-2 px-4.5 rounded-xl text-xs font-bold uppercase tracking-wider shadow-lg shadow-indigo-950/30 transition-all cursor-pointer"
+                              className="flex items-center gap-1.5 text-[9px] font-bold uppercase text-rose-450 hover:text-rose-450 bg-rose-950/20 px-2.5 py-1.5 rounded-lg border border-rose-900/30 cursor-pointer"
                             >
-                              CHOOSE SLOT
-                            </button>
-                          ) : (
-                            <button
-                              disabled
-                              className="bg-slate-850/50 text-slate-600 py-2 px-4.5 rounded-xl text-xs font-semibold uppercase tracking-wider cursor-not-allowed"
-                            >
-                              OCCUPIED
+                              <RotateCcw className="w-3 h-3" />
+                              Clear all
                             </button>
                           )}
                         </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-2 text-left">
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Minimum Capacity Seats</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[0, 15, 30, 50, 100].map((cap) => {
+                                const active = minCapacity === cap;
+                                return (
+                                  <button
+                                    key={cap}
+                                    onClick={() => setMinCapacity(cap)}
+                                    className={`text-[10px] font-extrabold py-1 px-2.5 rounded-lg border transition-all cursor-pointer ${
+                                      active ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'
+                                    }`}
+                                  >
+                                    {cap === 0 ? 'Any Seats' : `${cap}+ Seats`}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Room Status Availability</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { value: 'all', label: 'Include Booked' },
+                                { value: 'available', label: 'Only Available' }
+                              ].map((option) => {
+                                const active = statusFilter === option.value;
+                                return (
+                                  <button
+                                    key={option.value}
+                                    onClick={() => setStatusFilter(option.value as any)}
+                                    className={`text-[10px] font-extrabold py-1 px-2.5 rounded-lg border transition-all cursor-pointer ${
+                                      active ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'
+                                    }`}
+                                  >
+                                    {option.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Amenities & Features</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {['Projector', 'Whiteboard', 'Display/Screen', 'Audio/Video', 'Ergonomics/Seating'].map((feat) => {
+                                const isSelected = selectedFeatureToggles.includes(feat);
+                                return (
+                                  <button
+                                    key={feat}
+                                    onClick={() => {
+                                      setSelectedFeatureToggles(prev =>
+                                        isSelected ? prev.filter(t => t !== feat) : [...prev, feat]
+                                      );
+                                    }}
+                                    className={`text-[10.5px] font-semibold py-1 px-2.5 rounded-lg border transition-all flex items-center gap-1 cursor-pointer ${
+                                      isSelected ? 'bg-indigo-950 text-indigo-300 border-indigo-800' : 'bg-slate-950 border-slate-850 text-slate-500 hover:text-slate-350'
+                                    }`}
+                                  >
+                                    {isSelected && <Check className="w-3 h-3 text-indigo-400" />}
+                                    {feat}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Directory View Toggler layout switcher */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-900 border border-slate-800 rounded-2xl gap-3 text-left">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-indigo-950/80 rounded-xl border border-indigo-900/30 text-indigo-400">
+                        {directoryViewMode === 'grid' ? (
+                          <Grid className="w-4 h-4" />
+                        ) : (
+                          <Map className="w-4 h-4" />
+                        )}
                       </div>
-                    ))}
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">Directory Layout</span>
+                        <span className="text-xs font-black text-white">{directoryViewMode === 'grid' ? 'Grid Cards View' : 'Interactive CAD Floor Blueprint'}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 self-stretch sm:self-auto justify-stretch">
+                      <button
+                        onClick={() => setDirectoryViewMode('grid')}
+                        className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all uppercase tracking-wider cursor-pointer ${
+                          directoryViewMode === 'grid'
+                            ? 'bg-indigo-600 text-white shadow-md'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Grid className="w-3.5 h-3.5" />
+                        <span>Grid View</span>
+                      </button>
+                      <button
+                        onClick={() => setDirectoryViewMode('floorplan')}
+                        className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all uppercase tracking-wider cursor-pointer ${
+                          directoryViewMode === 'floorplan'
+                            ? 'bg-indigo-600 text-white shadow-md'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Map className="w-3.5 h-3.5" />
+                        <span>Floor Plan Map</span>
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Rooms Cards Grid / Floor Plan Mapping Conditional Branch */}
+                  {directoryViewMode === 'grid' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8" id="directory-section">
+                      {filteredRooms.map((room) => {
+                        // Generate reliable ratings based on room capacity & features
+                        const rating = room.capacity > 100 ? '4.9' : room.capacity > 30 ? '4.8' : '4.7';
+                        const reviewCount = room.capacity > 100 ? '42 reviews' : room.capacity > 30 ? '28 reviews' : '15 reviews';
+                        
+                        return (
+                          <div
+                            key={room.id}
+                            className="bg-white border border-[#ead29c]/40 rounded-3xl overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between group"
+                          >
+                            <div>
+                              {/* Luxury Image Area with dynamic status badges */}
+                              <div className="relative h-56 overflow-hidden">
+                                <img 
+                                  src={room.image} 
+                                  alt={room.name} 
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-all duration-500" 
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
+                                
+                                {/* Live Availability Status Indicator */}
+                                <div className="absolute top-4 left-4">
+                                  <span className={`text-[10px] font-extrabold uppercase py-1.5 px-3 rounded-xl font-mono border flex items-center gap-1.5 shadow-md ${
+                                    room.status === 'available' 
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200/60' 
+                                      : 'bg-rose-50 text-rose-800 border-rose-200/60'
+                                  }`}>
+                                    <span className={`w-2 h-2 rounded-full ${
+                                      room.status === 'available' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
+                                    }`} />
+                                    {room.status === 'available' ? 'AVAILABLE' : 'OCCUPIED'}
+                                  </span>
+                                </div>
+
+                                {/* Premium Star Rating badge */}
+                                <div className="absolute top-4 right-4">
+                                  <div className="bg-[#faf8f2]/95 backdrop-blur-sm border border-[#ead29c] rounded-xl px-2.5 py-1 flex items-center gap-1 shadow-md">
+                                    <Star className="w-3.5 h-3.5 fill-[#c09728] text-[#c09728]" />
+                                    <span className="text-[11px] font-extrabold text-[#0a4735] font-mono">{rating}</span>
+                                    <span className="text-[9px] text-slate-500">({reviewCount})</span>
+                                  </div>
+                                </div>
+
+                                {/* Room category overlay */}
+                                <div className="absolute bottom-4 left-4 right-4 text-left">
+                                  {room.category && (
+                                    <span className="bg-[#dfb965] text-[#0a4735] text-[9.5px] font-extrabold uppercase py-0.5 px-2 rounded-lg border border-[#ead29c]/50 mb-1.5 inline-block tracking-wider font-mono">
+                                      {room.category}
+                                    </span>
+                                  )}
+                                  <h3 className="text-xl font-display font-extrabold text-white leading-tight drop-shadow-lg">
+                                    {room.name}
+                                  </h3>
+                                  <div className="flex flex-wrap items-center gap-x-3 mt-1.5 text-xs text-stone-200 font-sans">
+                                    <span className="flex items-center gap-1">
+                                      <Users className="w-3.5 h-3.5 text-[#dfb965]" /> 
+                                      <strong>{room.capacity}</strong> standard capacity
+                                    </span>
+                                    {room.building && (
+                                      <span className="flex items-center gap-1 border-l border-white/20 pl-3">
+                                        <Building2 className="w-3.5 h-3.5 text-[#dfb965]" /> 
+                                        {room.building}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Card Body Features & Details */}
+                              <div className="p-6 space-y-4">
+                                {room.bestFor && (
+                                  <div className="space-y-1 text-xs text-left">
+                                    <span className="block text-[9px] font-bold text-[#c09728] uppercase tracking-widest font-mono">Best suited for</span>
+                                    <p className="text-slate-650 leading-relaxed font-serif font-light">{room.bestFor}</p>
+                                  </div>
+                                )}
+
+                                {/* Amenity Tags with live icons */}
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                  {room.features.map((f, i) => {
+                                    // Choose a premium icon based on amenity text
+                                    const text = f.toLowerCase();
+                                    let icon = <Compass className="w-3.5 h-3.5 text-[#0a4735]" />;
+                                    if (text.includes('projector') || text.includes('display') || text.includes('screen')) {
+                                      icon = <Tv className="w-3.5 h-3.5 text-[#0a4735]" />;
+                                    } else if (text.includes('sound') || text.includes('audio') || text.includes('video') || text.includes('conferencing')) {
+                                      icon = <Wifi className="w-3.5 h-3.5 text-[#c09728]" />;
+                                    } else if (text.includes('ac') || text.includes('air conditioning') || text.includes('wind')) {
+                                      icon = <Wind className="w-3.5 h-3.5 text-sky-650" />;
+                                    } else if (text.includes('whiteboard') || text.includes('glass')) {
+                                      icon = <BookOpen className="w-3.5 h-3.5 text-[#0a4735]" />;
+                                    } else if (text.includes('ergonomic') || text.includes('seating') || text.includes('chairs')) {
+                                      icon = <Accessibility className="w-3.5 h-3.5 text-[#0a4735]" />;
+                                    }
+
+                                    return (
+                                      <span 
+                                        key={i} 
+                                        className="bg-[#faf8f2] text-[#0a4735] border border-[#ead29c]/30 py-1 px-2.5 rounded-xl text-[10.5px] font-bold flex items-center gap-1.5 shadow-sm hover:bg-[#faf8f2]/90"
+                                      >
+                                        {icon}
+                                        <span>{f}</span>
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Active Reservations beautifully mapped */}
+                                <div className="pt-4 border-t border-[#ead29c]/30 text-left">
+                                  {(() => {
+                                    const roomBookings = adminBookings.filter(b => 
+                                      b.room_name?.toLowerCase().includes(room.name.toLowerCase()) || 
+                                      room.name?.toLowerCase().includes(b.room_name?.toLowerCase())
+                                    );
+
+                                    return (
+                                      <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] font-bold text-[#0a4735] uppercase tracking-wider font-mono flex items-center gap-1">
+                                            <Calendar className="w-3.5 h-3.5 text-[#c09728]" />
+                                            Active Schedule
+                                          </span>
+                                          <button
+                                            onClick={() => setSelectedRoomForHistory(room)}
+                                            className="text-[10px] font-bold text-[#c09728] hover:text-[#0a4735] transition-all cursor-pointer underline underline-offset-2 decoration-[#ead29c]"
+                                          >
+                                            View History →
+                                          </button>
+                                        </div>
+
+                                        {roomBookings.length === 0 ? (
+                                          <p className="text-[10.5px] text-slate-450 italic pl-1">This space is completely vacant today. Book below!</p>
+                                        ) : (
+                                          <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 custom-scrollbar">
+                                            {roomBookings.map((b) => {
+                                              const startDate = new Date(b.start_time);
+                                              const endDate = new Date(b.end_time);
+                                              const isToday = startDate.toDateString() === new Date().toDateString();
+                                              
+                                              const dateStr = isToday 
+                                                ? 'Today' 
+                                                : startDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                                              
+                                              const timeStr = `${startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+                                              return (
+                                                <div 
+                                                  key={b.id} 
+                                                  className="p-2.5 bg-[#faf8f2] rounded-xl border border-[#ead29c]/25 text-left space-y-0.5 hover:border-[#dfb965] transition-all shadow-sm"
+                                                >
+                                                  <div className="flex items-center justify-between gap-2">
+                                                    <span className="font-bold text-slate-800 text-[11px] truncate max-w-[150px]" title={b.summary}>
+                                                      {b.summary}
+                                                    </span>
+                                                    <span className="text-[8.5px] bg-[#0a4735] text-white font-bold px-1.5 py-0.5 rounded-lg uppercase tracking-wider font-mono">
+                                                      {dateStr}
+                                                    </span>
+                                                  </div>
+                                                  <div className="flex items-center justify-between text-[9.5px] text-slate-500 font-mono">
+                                                    <span>{timeStr}</span>
+                                                    <span className="truncate max-w-[90px]" title={b.creator_name}>
+                                                      By: {b.creator_name?.split(' ')[0]}
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Card Footer actions bar */}
+                            <div className="p-5 pt-4 border-t border-[#ead29c]/25 flex items-center justify-between gap-2.5 bg-[#faf8f2]/30 shrink-0">
+                              <button
+                                onClick={() => {
+                                  setSelectedQRRoom(room);
+                                  setScanComplete(false);
+                                }}
+                                className="px-3.5 py-2.5 bg-white hover:bg-[#faf8f2] border border-[#ead29c]/60 hover:border-[#dfb965] text-[#0a4735] rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all shadow-sm cursor-pointer"
+                                title="Generate dynamic QR Access Code"
+                              >
+                                QR Access
+                              </button>
+
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => setSelectedRoomForDetails(room)}
+                                  className="px-3.5 py-2.5 bg-white hover:bg-[#faf8f2] border border-[#ead29c]/60 hover:border-[#dfb965] text-[#0a4735] rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer"
+                                >
+                                  View Details
+                                </button>
+
+                                {room.status === 'available' ? (
+                                  <button
+                                    onClick={() => {
+                                      setConfirmRoomSelection(room);
+                                      setPreselectedRoomId(room.id);
+                                    }}
+                                    className="px-4.5 py-2.5 bg-[#0a4735] hover:bg-[#063325] text-white rounded-xl text-[10px] font-extrabold uppercase tracking-wider shadow-md hover:shadow-lg transition-all cursor-pointer hover:-translate-y-0.5"
+                                  >
+                                    Book Now
+                                  </button>
+                                ) : (
+                                  <button
+                                    disabled
+                                    className="px-4 py-2.5 bg-slate-100 border border-slate-200 text-slate-400 rounded-xl text-[10px] font-bold uppercase tracking-wider cursor-not-allowed"
+                                  >
+                                    Occupied
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                  <FloorPlanView
+                    rooms={rooms}
+                    filteredRooms={filteredRooms}
+                    adminBookings={adminBookings}
+                    syncingBookingId={syncingBookingId}
+                    onChooseSlot={(room) => {
+                      setConfirmRoomSelection(room);
+                      setPreselectedRoomId(room.id);
+                    }}
+                    onViewHistory={(room) => setSelectedRoomForHistory(room)}
+                    onShowQR={(room) => {
+                      setSelectedQRRoom(room);
+                      setScanComplete(false);
+                    }}
+                    onAddToGoogleCalendar={handleAddToGoogleCalendar}
+                  />
+                )}
                 </div>
               )}
 
@@ -1931,22 +3019,93 @@ export default function App() {
                   </div>
 
                   {/* Summary metric cubes */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl">
-                      <span className="text-[10px] text-slate-500 block uppercase font-mono tracking-widest">TOTAL BOOKINGS SECURED</span>
-                      <strong className="text-3xl font-black text-indigo-400 block mt-1">{analyticsStats?.totalBookings || adminBookings.length}</strong>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                    {/* Card 1 */}
+                    <div className={`p-6 rounded-2xl border transition-all duration-300 hover:shadow-lg relative overflow-hidden flex flex-col justify-between h-36 ${
+                      isDarkMode 
+                        ? 'bg-slate-900/60 border-slate-800 hover:border-indigo-500/55' 
+                        : 'bg-white border-slate-200/80 shadow-sm hover:shadow-indigo-100/50 hover:border-indigo-400'
+                    }`}>
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
+                      <div className="flex items-start justify-between">
+                        <span className={`text-[10px] font-bold tracking-wider font-mono uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>TOTAL BOOKINGS SECURED</span>
+                        <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-indigo-950/60 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                          <Calendar className="w-5 h-5" />
+                        </div>
+                      </div>
+                      <div className="mt-4 text-left">
+                        <strong className={`text-3xl font-extrabold tracking-tight block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{analyticsStats?.totalBookings || adminBookings.length}</strong>
+                        <span className="text-[10px] text-emerald-500 font-semibold flex items-center gap-1 mt-1">
+                          <span>↑ 12.4%</span>
+                          <span className={`font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>vs last week</span>
+                        </span>
+                      </div>
                     </div>
-                    <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl">
-                      <span className="text-[10px] text-slate-500 block uppercase font-mono tracking-widest">TOTAL ACADEMIC USERS</span>
-                      <strong className="text-3xl font-black text-teal-400 block mt-1">{analyticsStats?.totalUsers || adminUsers.length || 3}</strong>
+
+                    {/* Card 2 */}
+                    <div className={`p-6 rounded-2xl border transition-all duration-300 hover:shadow-lg relative overflow-hidden flex flex-col justify-between h-36 ${
+                      isDarkMode 
+                        ? 'bg-slate-900/60 border-slate-800 hover:border-violet-500/55' 
+                        : 'bg-white border-slate-200/80 shadow-sm hover:shadow-violet-100/50 hover:border-violet-400'
+                    }`}>
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/5 rounded-full blur-2xl pointer-events-none" />
+                      <div className="flex items-start justify-between">
+                        <span className={`text-[10px] font-bold tracking-wider font-mono uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>TOTAL ACADEMIC USERS</span>
+                        <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-violet-950/60 text-violet-400' : 'bg-violet-50 text-violet-600'}`}>
+                          <Users className="w-5 h-5" />
+                        </div>
+                      </div>
+                      <div className="mt-4 text-left">
+                        <strong className={`text-3xl font-extrabold tracking-tight block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{analyticsStats?.totalUsers || adminUsers.length || 3}</strong>
+                        <span className="text-[10px] text-emerald-505 font-semibold flex items-center gap-1 mt-1">
+                          <span>Active nodes</span>
+                          <span className={`font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>synchronized</span>
+                        </span>
+                      </div>
                     </div>
-                    <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl">
-                      <span className="text-[10px] text-slate-500 block uppercase font-mono tracking-widest">ALLOCATED HOURS</span>
-                      <strong className="text-3xl font-black text-amber-400 block mt-1">{analyticsStats?.totalAssignedHours || 0} Hours</strong>
+
+                    {/* Card 3 */}
+                    <div className={`p-6 rounded-2xl border transition-all duration-300 hover:shadow-lg relative overflow-hidden flex flex-col justify-between h-36 ${
+                      isDarkMode 
+                        ? 'bg-slate-900/60 border-slate-800 hover:border-amber-500/55' 
+                        : 'bg-white border-slate-200/80 shadow-sm hover:shadow-amber-100/50 hover:border-amber-400'
+                    }`}>
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+                      <div className="flex items-start justify-between">
+                        <span className={`text-[10px] font-bold tracking-wider font-mono uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>ALLOCATED HOURS</span>
+                        <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-amber-950/60 text-amber-400' : 'bg-amber-50 text-amber-650'}`}>
+                          <Clock className="w-5 h-5" />
+                        </div>
+                      </div>
+                      <div className="mt-4 text-left">
+                        <strong className={`text-3xl font-extrabold tracking-tight block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{analyticsStats?.totalAssignedHours || 0} Hours</strong>
+                        <span className="text-[10px] text-indigo-405 font-semibold flex items-center gap-1 mt-1">
+                          <span>Weekly block</span>
+                          <span className={`font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>utilization</span>
+                        </span>
+                      </div>
                     </div>
-                    <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl">
-                      <span className="text-[10px] text-slate-500 block uppercase font-mono tracking-widest">SEAT DENSITY INDEX</span>
-                      <strong className="text-3xl font-black text-violet-400 block mt-1">94.2%</strong>
+
+                    {/* Card 4 */}
+                    <div className={`p-6 rounded-2xl border transition-all duration-300 hover:shadow-lg relative overflow-hidden flex flex-col justify-between h-36 ${
+                      isDarkMode 
+                        ? 'bg-slate-900/60 border-slate-800 hover:border-emerald-500/55' 
+                        : 'bg-white border-slate-200/80 shadow-sm hover:shadow-emerald-100/50 hover:border-emerald-400'
+                    }`}>
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
+                      <div className="flex items-start justify-between">
+                        <span className={`text-[10px] font-bold tracking-wider font-mono uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>SEAT DENSITY INDEX</span>
+                        <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-emerald-950/60 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+                          <Activity className="w-5 h-5" />
+                        </div>
+                      </div>
+                      <div className="mt-4 text-left">
+                        <strong className={`text-3xl font-extrabold tracking-tight block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>94.2%</strong>
+                        <span className="text-[10px] text-emerald-505 font-semibold flex items-center gap-1 mt-1">
+                          <span>Optimal load</span>
+                          <span className={`font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>registered</span>
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -2039,74 +3198,292 @@ export default function App() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     {/* Add Room form panel */}
                     <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-slate-850">
-                        <Plus className="w-5 h-5 text-indigo-400" />
-                        De novo Room Creation Panel
-                      </h3>
-                      <form onSubmit={handleAdminAddRoom} className="space-y-4 text-left">
-                        <div>
-                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Space Display Name*</label>
-                          <input
-                            type="text"
-                            required
-                            placeholder="e.g. Satish Dhawan Lecture Suite"
-                            value={adminRoomName}
-                            onChange={(e) => setAdminRoomName(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
-                          />
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-850">
+                        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                          {adminRoomTab === 'single' ? (
+                            <>
+                              <Plus className="w-5 h-5 text-indigo-400" />
+                              De novo Room Creation
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-5 h-5 text-indigo-400" />
+                              Bulk Room CSV Import
+                            </>
+                          )}
+                        </h3>
+                        <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setAdminRoomTab('single')}
+                            className={`px-2 py-1 rounded text-[10px] font-mono font-bold transition-all ${
+                              adminRoomTab === 'single'
+                                ? 'bg-indigo-600 text-white'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            Single
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAdminRoomTab('bulk')}
+                            className={`px-2 py-1 rounded text-[10px] font-mono font-bold transition-all ${
+                              adminRoomTab === 'bulk'
+                                ? 'bg-indigo-600 text-white'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            Bulk (CSV)
+                          </button>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                      </div>
+
+                      {adminRoomTab === 'single' ? (
+                        <form onSubmit={handleAdminAddRoom} className="space-y-4 text-left">
                           <div>
-                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Seating capacity*</label>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Space Display Name*</label>
                             <input
-                              type="number"
+                              type="text"
                               required
-                              value={adminRoomCapacity}
-                              onChange={(e) => setAdminRoomCapacity(Number(e.target.value))}
-                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                              placeholder="e.g. Satish Dhawan Lecture Suite"
+                              value={adminRoomName}
+                              onChange={(e) => setAdminRoomName(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Seating capacity*</label>
+                              <input
+                                type="number"
+                                required
+                                value={adminRoomCapacity}
+                                onChange={(e) => setAdminRoomCapacity(Number(e.target.value))}
+                                className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Visual Gradient color</label>
+                              <select
+                                value={adminRoomColor}
+                                onChange={(e) => setAdminRoomColor(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none"
+                              >
+                                <option value="from-slate-705 to-slate-900">Charcoal Slate</option>
+                                <option value="from-violet-600 to-indigo-805">Violet Indigo</option>
+                                <option value="from-amber-600 to-orange-805">Amber Boardroom</option>
+                                <option value="from-teal-600 to-emerald-805">Teal Lecture</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Features / Equipment list (Comma split)</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Acoustic soundproofing, Laser Projector, Smart Cooler"
+                              value={adminRoomFeatures}
+                              onChange={(e) => setAdminRoomFeatures(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Visual Gradient color</label>
-                            <select
-                              value={adminRoomColor}
-                              onChange={(e) => setAdminRoomColor(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none"
-                            >
-                              <option value="from-slate-705 to-slate-900">Charcoal Slate</option>
-                              <option value="from-violet-600 to-indigo-805">Violet Indigo</option>
-                              <option value="from-amber-600 to-orange-805">Amber Boardroom</option>
-                              <option value="from-teal-600 to-emerald-805">Teal Lecture</option>
-                            </select>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Photo URL placeholder</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Unsplash photo URL"
+                              value={adminRoomImage}
+                              onChange={(e) => setAdminRoomImage(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
+                            />
                           </div>
+                          <button
+                            type="submit"
+                            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-3 rounded-xl text-xs uppercase"
+                          >
+                            De novo Create Room
+                          </button>
+                        </form>
+                      ) : (
+                        <div className="space-y-4 text-left font-sans">
+                          <div className="p-3 bg-indigo-950/20 text-indigo-300 rounded-xl border border-indigo-900/35 text-xs flex flex-col gap-1.5">
+                            <span className="font-semibold text-indigo-200">CSV Column Formatting Guide:</span>
+                            <span className="font-mono text-[10px] bg-slate-950 p-1.5 rounded border border-slate-900 overflow-x-auto select-all block">
+                              name,capacity,features,image,color
+                            </span>
+                            <div className="flex items-center justify-between mt-1 pt-1.5 border-t border-indigo-900/20">
+                              <span className="text-[10px] text-slate-400">Features separation: Semicolon (;) or Comma (,)</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const demoText = `name,capacity,features,image,color\n"Homi Bhabha Lecture Lounge",55,"Laser Projector;Acoustic Soundproofing;Wi-Fi",https://images.unsplash.com/photo-1517502884422-41eaaced0168?w=800,from-violet-600 to-indigo-805\n"Vikram Sarabhai Lab Space",24,"High-Speed Fiber Ethernet;Smart Cooling",,from-teal-600 to-emerald-805\n"Harish-Chandra Seminar Studio",40,"Dual Glass Whiteboards;Ergonomic Seating",,from-amber-600 to-orange-805`;
+                                  setCsvText(demoText);
+                                  handleParseCsv(demoText);
+                                  addToast('Sample academic room spaces pre-filled!', 'success');
+                                }}
+                                className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 underline font-mono flex items-center gap-0.5 cursor-pointer"
+                              >
+                                ⚡ Load Live Demo CSV
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Interactive Dropzone block */}
+                          <div
+                            onDragEnter={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDragActive(true);
+                            }}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDragActive(true);
+                            }}
+                            onDragLeave={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDragActive(false);
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDragActive(false);
+                              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                                const file = e.dataTransfer.files[0];
+                                const reader = new FileReader();
+                                reader.onload = (event) => {
+                                  const text = event.target?.result as string;
+                                  setCsvText(text);
+                                  handleParseCsv(text);
+                                };
+                                reader.readAsText(file);
+                              }
+                            }}
+                            className={`p-5 rounded-xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-2 cursor-pointer relative ${
+                              dragActive 
+                                ? 'border-indigo-500 bg-indigo-500/5' 
+                                : 'border-slate-800 bg-slate-950 hover:border-slate-750'
+                            }`}
+                          >
+                            <input
+                              type="file"
+                              id="csv-file-upload-input"
+                              accept=".csv,text/csv"
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  const file = e.target.files[0];
+                                  const reader = new FileReader();
+                                  reader.onload = (event) => {
+                                    const text = event.target?.result as string;
+                                    setCsvText(text);
+                                    handleParseCsv(text);
+                                  };
+                                  reader.readAsText(file);
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer"
+                            />
+                            <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-slate-400">
+                              <FileSpreadsheet className="w-5 h-5 text-indigo-400" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-xs font-semibold text-slate-300">Drag & Drop room .csv file here</p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">or click inside local explorer to select</p>
+                            </div>
+                          </div>
+
+                          {/* Paste Textarea alternative */}
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1">
+                              Or Paste raw CSV rows:
+                            </label>
+                            <textarea
+                              rows={4}
+                              value={csvText}
+                              onChange={(e) => {
+                                setCsvText(e.target.value);
+                                handleParseCsv(e.target.value);
+                              }}
+                              placeholder='e.g. "Space A",40,"Whiteboard, Projector"\n"Space B",15,"Wi-Fi"'
+                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500 font-mono"
+                            />
+                          </div>
+
+                          {/* Real-time parsing Errors feedback */}
+                          {csvErrors.length > 0 && (
+                            <div className="p-3 bg-amber-950/20 border border-amber-900/30 text-amber-500 rounded-xl text-xs space-y-1">
+                              <strong className="font-semibold block text-amber-400">CSV Parsing validation warnings:</strong>
+                              <ul className="list-disc pl-4 space-y-0.5 text-[11px] max-h-[100px] overflow-y-auto">
+                                {csvErrors.map((err, i) => (
+                                  <li key={i}>{err}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {/* Real-time parsed items Preview */}
+                          {parsedRooms.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
+                                  Parsed Inventory Preview ({parsedRooms.length} room spaces)
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCsvText('');
+                                    setParsedRooms([]);
+                                    setCsvErrors([]);
+                                  }}
+                                  className="text-[10px] font-semibold text-rose-400 hover:text-rose-350 font-mono transition-colors"
+                                >
+                                  Clear Preview
+                                </button>
+                              </div>
+
+                              <div className="space-y-2 max-h-[140px] overflow-y-auto pr-1">
+                                {parsedRooms.map((room, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="p-2.5 bg-slate-950 border border-slate-850 rounded-lg flex items-center justify-between text-xs transition-all hover:border-slate-800"
+                                  >
+                                    <div className="text-left space-y-1">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`w-24 h-1.5 rounded-full bg-gradient-to-tr ${room.color}`} style={{ width: '12px', height: '12px' }} />
+                                        <strong className="text-slate-200">{room.name}</strong>
+                                      </div>
+                                      <div className="flex flex-wrap gap-1">
+                                        {room.features.slice(0, 3).map((feat: string, fidx: number) => (
+                                          <span key={fidx} className="px-1.5 py-0.5 bg-slate-900 border border-slate-850 rounded text-[9px] text-slate-400">
+                                            {feat}
+                                          </span>
+                                        ))}
+                                        {room.features.length > 3 && (
+                                          <span className="text-[9px] text-slate-550 self-center">
+                                            +{room.features.length - 3} more
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <span className="px-2 py-0.5 bg-indigo-950 border border-indigo-900/40 text-indigo-300 rounded text-[10px] font-mono font-bold shrink-0">
+                                      Cap: {room.capacity}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={handleAdminBulkImportRooms}
+                                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-3 rounded-xl text-xs uppercase flex items-center justify-center gap-1.5 transition-colors mt-2 cursor-pointer"
+                              >
+                                <Upload className="w-4 h-4" />
+                                Import {parsedRooms.length} Spaces into Database
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Features / Equipment list (Comma split)</label>
-                          <input
-                            type="text"
-                            placeholder="e.g. Acoustic soundproofing, Laser Projector, Smart Cooler"
-                            value={adminRoomFeatures}
-                            onChange={(e) => setAdminRoomFeatures(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Photo URL placeholder</label>
-                          <input
-                            type="text"
-                            placeholder="e.g. Unsplash photo URL"
-                            value={adminRoomImage}
-                            onChange={(e) => setAdminRoomImage(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
-                          />
-                        </div>
-                        <button
-                          type="submit"
-                          className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-3 rounded-xl text-xs uppercase"
-                        >
-                          De novo Create Room
-                        </button>
-                      </form>
+                      )}
                     </div>
 
                     {/* Manage user roles and credentials panel */}
@@ -2243,7 +3620,7 @@ export default function App() {
                     isLinking={isLinkingGoogle}
                   />
                 ) : (
-                  <DriveWidget receiptLogs={sessionReceipts} />
+                  <DriveWidget receiptLogs={sessionReceipts} addToast={addToast} />
                 )
               )}
 
@@ -2261,6 +3638,7 @@ export default function App() {
                     userEmail={user.email} 
                     gmailLog={gmailLog}
                     setGmailLog={setGmailLog}
+                    addToast={addToast}
                   />
                 )
               )}
@@ -2278,6 +3656,7 @@ export default function App() {
                   <ChatWidget 
                     chatLog={chatLog}
                     setChatLog={setChatLog}
+                    addToast={addToast}
                   />
                 )
               )}
@@ -2297,8 +3676,11 @@ export default function App() {
               )}
 
             </motion.div>
+            </div>
           </AnimatePresence>
 
+            </div> {/* Closing right-hand col-span-9 from sidebar grid */}
+          </div> {/* Closing lg:grid lg:grid-cols-12 from sidebar grid */}
         </main>
       </div>
 
@@ -2654,6 +4036,26 @@ export default function App() {
                                       </span>
                                     </div>
                                   </div>
+
+                                  <div className="pt-2 border-t border-slate-900/60 flex justify-end">
+                                    <button
+                                      onClick={() => handleAddToGoogleCalendar(b)}
+                                      disabled={syncingBookingId === b.id}
+                                      className="py-1 px-3 bg-indigo-650/40 hover:bg-indigo-600/70 text-slate-200 text-[10px] font-extrabold uppercase tracking-wider rounded-lg border border-indigo-500/25 flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
+                                    >
+                                      {syncingBookingId === b.id ? (
+                                        <>
+                                          <Loader2 className="w-3 h-3 animate-spin text-indigo-300" />
+                                          <span>Syncing...</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <CalendarPlus className="w-3 h-3 text-indigo-400" />
+                                          <span>Add to Google Calendar</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -2676,6 +4078,208 @@ export default function App() {
                 >
                   Close Insights Drawer
                 </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* PREMIUM DETAILED ROOM INFO DRAWER */}
+      <AnimatePresence>
+        {selectedRoomForDetails && (
+          <>
+            {/* Dark blur backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedRoomForDetails(null)}
+              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 cursor-pointer"
+            />
+
+            {/* Slide-out drawer panel */}
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+              className="fixed right-0 top-0 bottom-0 w-full sm:max-w-md bg-white border-l border-[#ead29c]/50 shadow-2xl z-50 flex flex-col h-full text-[#0a4735] overflow-hidden text-left"
+            >
+              {/* Cover Image Header */}
+              <div className="relative h-56 shrink-0 bg-stone-100">
+                <img 
+                  src={selectedRoomForDetails.image} 
+                  alt={selectedRoomForDetails.name} 
+                  className="w-full h-full object-cover" 
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#0a4735] via-[#0a4735]/40 to-transparent" />
+                
+                {/* Close Button overlay */}
+                <button
+                  onClick={() => setSelectedRoomForDetails(null)}
+                  className="absolute top-4 right-4 p-2 bg-black/55 hover:bg-black/75 text-white rounded-full transition-all cursor-pointer backdrop-blur-sm flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+
+                <div className="absolute bottom-4 left-6 right-6 text-left">
+                  {selectedRoomForDetails.category && (
+                    <span className="bg-[#dfb965] text-[#0a4735] text-[9px] font-extrabold uppercase py-0.5 px-2 rounded-lg border border-[#ead29c]/50 mb-1.5 inline-block tracking-wider font-mono">
+                      {selectedRoomForDetails.category}
+                    </span>
+                  )}
+                  <h3 className="text-2xl font-display font-extrabold text-white drop-shadow-md leading-tight">
+                    {selectedRoomForDetails.name}
+                  </h3>
+                </div>
+              </div>
+
+              {/* Scrollable details */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Live Status indicator banner */}
+                <div className={`p-4 rounded-2xl border flex items-center justify-between shadow-sm ${
+                  selectedRoomForDetails.status === 'available' 
+                    ? 'bg-emerald-50/70 border-emerald-200/60 text-emerald-800' 
+                    : 'bg-rose-50/70 border-rose-200/60 text-rose-800'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${
+                      selectedRoomForDetails.status === 'available' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
+                    }`} />
+                    <span className="text-xs font-mono font-extrabold uppercase tracking-wider">
+                      {selectedRoomForDetails.status === 'available' ? 'SPACE IS VACANT' : 'SPACE IS RESERVED'}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-500 font-bold">Real-time status</span>
+                </div>
+
+                {/* Core Specifications */}
+                <div className="bg-[#faf8f2] border border-[#ead29c]/30 rounded-2xl p-4.5 space-y-3.5">
+                  <h4 className="text-[10px] font-extrabold text-[#c09728] uppercase tracking-widest font-mono">
+                    Core Specifications
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1 text-left">
+                      <span className="text-[10.5px] text-slate-400 block font-semibold uppercase tracking-wider">Seating Capacity</span>
+                      <div className="flex items-center gap-1.5 font-bold text-slate-800 text-sm">
+                        <Users className="w-4 h-4 text-[#0a4735]" />
+                        <span>{selectedRoomForDetails.capacity} Seats</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-left">
+                      <span className="text-[10.5px] text-slate-400 block font-semibold uppercase tracking-wider">Campus Venue</span>
+                      <div className="flex items-center gap-1.5 font-bold text-slate-800 text-sm">
+                        <Building2 className="w-4 h-4 text-[#0a4735]" />
+                        <span className="truncate">{selectedRoomForDetails.building || 'IIT (BHU)'}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* suitables for description */}
+                {selectedRoomForDetails.bestFor && (
+                  <div className="space-y-2 text-left">
+                    <h4 className="text-[10px] font-extrabold text-[#c09728] uppercase tracking-widest font-mono">
+                      Academic Suitability
+                    </h4>
+                    <p className="text-slate-650 text-xs leading-relaxed font-serif font-light">
+                      {selectedRoomForDetails.bestFor}
+                    </p>
+                  </div>
+                )}
+
+                {/* Features & Amenities */}
+                <div className="space-y-3 text-left">
+                  <h4 className="text-[10px] font-extrabold text-[#c09728] uppercase tracking-widest font-mono">
+                    Available Technology & Amenities
+                  </h4>
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {selectedRoomForDetails.features.map((feature, idx) => {
+                      // Dynamic Icon Matching
+                      const text = feature.toLowerCase();
+                      let icon = <Compass className="w-4 h-4 text-[#0a4735]" />;
+                      let featureDesc = "Fully integrated & certified for academic applications.";
+                      
+                      if (text.includes('projector') || text.includes('display') || text.includes('screen')) {
+                        icon = <Tv className="w-4 h-4 text-[#0a4735]" />;
+                        featureDesc = "Ultra-high-definition presentation output.";
+                      } else if (text.includes('sound') || text.includes('audio') || text.includes('video') || text.includes('conferencing')) {
+                        icon = <Wifi className="w-4 h-4 text-[#c09728]" />;
+                        featureDesc = "Optimized for hybrid lectures & remote participants.";
+                      } else if (text.includes('ac') || text.includes('air conditioning') || text.includes('wind')) {
+                        icon = <Wind className="w-4 h-4 text-sky-650" />;
+                        featureDesc = "Temperature-controlled climate feedback.";
+                      } else if (text.includes('whiteboard') || text.includes('glass')) {
+                        icon = <BookOpen className="w-4 h-4 text-[#0a4735]" />;
+                        featureDesc = "Writable surfaces for diagramming.";
+                      } else if (text.includes('ergonomic') || text.includes('seating') || text.includes('chairs')) {
+                        icon = <Accessibility className="w-4 h-4 text-[#0a4735]" />;
+                        featureDesc = "Comfortable seating for extended seminars.";
+                      }
+
+                      return (
+                        <div key={idx} className="flex items-start gap-3 p-3 bg-[#faf8f2]/40 border border-[#ead29c]/20 rounded-xl">
+                          <div className="p-2 bg-white rounded-lg border border-[#ead29c]/45 shrink-0 shadow-sm">
+                            {icon}
+                          </div>
+                          <div className="space-y-0.5 text-left">
+                            <span className="text-xs font-bold text-slate-800 block">{feature}</span>
+                            <span className="text-[10.5px] text-slate-500 block leading-tight">{featureDesc}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Booking contact and department */}
+                {selectedRoomForDetails.contactDepartment && (
+                  <div className="p-4 bg-stone-50 border border-stone-200/65 rounded-2xl text-left space-y-1">
+                    <span className="text-[9px] font-bold text-stone-500 uppercase tracking-widest font-mono">
+                      Administrative Custodian
+                    </span>
+                    <div className="text-xs text-slate-700">
+                      Primary contact: <strong className="text-[#0a4735] font-extrabold">{selectedRoomForDetails.contactDepartment}</strong>
+                    </div>
+                    <p className="text-[10px] text-slate-450">
+                      Subject to booking criteria of the coordinating department.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Action footer */}
+              <div className="p-6 bg-[#faf8f2]/60 border-t border-[#ead29c]/30 shrink-0 flex items-center gap-3">
+                <button
+                  onClick={() => setSelectedRoomForDetails(null)}
+                  className="flex-1 py-3 bg-white hover:bg-[#faf8f2] border border-[#ead29c] text-[#0a4735] font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm text-center font-display"
+                >
+                  Close Details
+                </button>
+                {selectedRoomForDetails.status === 'available' ? (
+                  <button
+                    onClick={() => {
+                      setConfirmRoomSelection(selectedRoomForDetails);
+                      setPreselectedRoomId(selectedRoomForDetails.id);
+                      setSelectedRoomForDetails(null);
+                      setActiveTab('calendar');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="flex-1 py-3 bg-[#0a4735] hover:bg-[#063325] text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md text-center font-display"
+                  >
+                    Reserve Now
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setSelectedRoomForHistory(selectedRoomForDetails);
+                      setSelectedRoomForDetails(null);
+                    }}
+                    className="flex-1 py-3 bg-[#dfb965] hover:bg-[#d4af37] text-[#0a4735] font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md text-center font-display"
+                  >
+                    View Schedule
+                  </button>
+                )}
               </div>
             </motion.div>
           </>

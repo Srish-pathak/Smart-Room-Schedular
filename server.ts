@@ -4,8 +4,25 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  getDocs, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  limit, 
+  orderBy, 
+  initializeFirestore 
+} from 'firebase/firestore';
 
 // Standard process configuration
 
@@ -54,42 +71,362 @@ if (isSupabaseConfigured) {
   console.log('📊 DATABASE ENGINE: Local-First Congruent PostgreSQL Fallback Actionable.');
 }
 
+// ==========================================
+// FIREBASE / CLOUD FIRESTORE REGIONAL ENGINE
+// ==========================================
+let firebaseApp: any = null;
+let firestoreDb: any = null;
+let isFirebaseActive = false;
+
+try {
+  const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(firebaseConfigPath)) {
+    const configRaw = fs.readFileSync(firebaseConfigPath, 'utf-8');
+    const config = JSON.parse(configRaw);
+    if (config.apiKey && config.projectId) {
+      firebaseApp = initializeApp({
+        apiKey: config.apiKey,
+        authDomain: config.authDomain,
+        projectId: config.projectId,
+        storageBucket: config.storageBucket,
+        messagingSenderId: config.messagingSenderId,
+        appId: config.appId
+      });
+      if (config.firestoreDatabaseId) {
+        firestoreDb = getFirestore(firebaseApp, config.firestoreDatabaseId);
+      } else {
+        firestoreDb = getFirestore(firebaseApp);
+      }
+      isFirebaseActive = true;
+      console.log('🔥 DATABASE ENGINE: Persistent Cloud Firestore Connected Successfully!');
+    }
+  }
+} catch (err) {
+  console.error('⚠️ Firebase Initialization Error, relying on local DB fallback:', err);
+}
+
+// Firestore Error Interface definitions according to Firebase Skill
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: null,
+      email: null,
+      emailVerified: null,
+      isAnonymous: null,
+      tenantId: null,
+      providerInfo: []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 // Fallback JSON-based local database persistence file
 const FALLBACK_DB_PATH = path.join(process.cwd(), 'fallback_postgres_db.json');
 
 const INITIAL_ROOMS = [
   {
     id: 'room-1',
-    name: 'S.N. Bose Seminar Hall',
-    capacity: 60,
-    features: ['Laser Projector', 'Acoustic Soundproofing', 'Video Conferencing', 'Dual Glass Whiteboards', 'Executive Faculty seating'],
+    name: 'Senate Hall',
+    building: 'Swatantrata Bhawan',
+    category: 'Central Institute Facility',
+    floor: 'Ground Floor',
+    capacity: 400,
+    features: ['Projector', 'Audio System', 'AC', 'Wheelchair Accessible', 'Microphone', 'Recording Facility'],
+    bestFor: 'Conferences, Institute Meetings, Convocations',
+    contactDepartment: 'Registrar Academic Section',
     image: 'https://images.unsplash.com/photo-1517502884422-41eaaced0168?w=800&auto=format&fit=crop&q=60',
-    color: 'from-slate-700 to-slate-900',
+    color: 'from-amber-700 to-orange-900'
   },
   {
     id: 'room-2',
-    name: 'Ramanujan Computing Centre',
-    capacity: 45,
-    features: ['High-Performance Computing cluster access', 'High-Speed Fiber Ethernet', 'Ultrawide Screen projection', 'Individual power outlets', 'Smart cooling'],
+    name: 'Institute Board Room',
+    building: 'Administration Block',
+    category: 'Central Institute Facility',
+    floor: '1st Floor',
+    capacity: 35,
+    features: ['Projector', 'AC', 'Wi-Fi', 'Smart Board'],
+    bestFor: 'Board Meetings, Administrative Meetings',
+    contactDepartment: 'Directorate Secretariat',
     image: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800&auto=format&fit=crop&q=60',
-    color: 'from-violet-600 to-indigo-800',
+    color: 'from-blue-700 to-cyan-900'
   },
   {
     id: 'room-3',
-    name: 'Visvesvaraya Conference Room',
-    capacity: 18,
-    features: ['85" 4K Video Display', 'Surround sound conferencing', 'Smart Capture Canvas', 'Ergonomic Boardroom seating', 'Integrated coffee bar'],
+    name: 'GTAC Conference Hall',
+    building: 'Gandhi Technology Alumni Centre (GTAC)',
+    category: 'Guest House Facility',
+    floor: 'Ground Floor',
+    capacity: 120,
+    features: ['Projector', 'AC', 'Audio System', 'Wi-Fi', 'Microphone'],
+    bestFor: 'Seminars, Workshops, Committee Meetings',
+    contactDepartment: 'GTAC In-charge',
     image: 'https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=800&auto=format&fit=crop&q=60',
-    color: 'from-amber-600 to-orange-800',
+    color: 'from-indigo-700 to-purple-900'
   },
   {
     id: 'room-4',
-    name: 'Aryabhata Lecture Theatre',
-    capacity: 120,
-    features: ['Staged Amphitheatre acoustics', 'Dual high-lumen projectors', 'Lavalier Microphone sound system', 'Writeable Whiteboard walls', 'Automated recording rig'],
-    image: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&auto=format&fit=crop&q=60',
-    color: 'from-teal-600 to-emerald-800',
+    name: 'GTAC Waiting Room',
+    building: 'Gandhi Technology Alumni Centre (GTAC)',
+    category: 'Guest House Facility',
+    floor: 'Ground Floor',
+    capacity: 15,
+    features: ['AC', 'Wi-Fi'],
+    bestFor: 'Small Meetings, Guest Discussions',
+    contactDepartment: 'GTAC Reception desk',
+    image: 'https://images.unsplash.com/photo-1517502884422-41eaaced0168?w=800&auto=format&fit=crop&q=60',
+    color: 'from-teal-700 to-slate-900'
   },
+  {
+    id: 'room-5',
+    name: 'Department Committee Room – Mechanical Engineering',
+    building: 'Mechanical Engineering Department',
+    category: 'Department Committee Room',
+    floor: 'Ground Floor',
+    capacity: 25,
+    features: ['Whiteboard', 'Projector', 'AC', 'Wi-Fi'],
+    bestFor: 'Faculty Meetings, Viva',
+    contactDepartment: 'Mechanical Engg Office',
+    image: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&auto=format&fit=crop&q=60',
+    color: 'from-orange-700 to-red-900'
+  },
+  {
+    id: 'room-6',
+    name: 'Department Committee Room – Civil Engineering',
+    building: 'Civil Engineering Department',
+    category: 'Department Committee Room',
+    floor: '1st Floor',
+    capacity: 25,
+    features: ['Projector', 'AC', 'Whiteboard'],
+    bestFor: 'Department Meetings',
+    contactDepartment: 'Civil Engg Office',
+    image: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800&auto=format&fit=crop&q=60',
+    color: 'from-amber-600 to-stone-900'
+  },
+  {
+    id: 'room-7',
+    name: 'Department Committee Room – Chemical Engineering',
+    building: 'Chemical Engineering Department',
+    category: 'Department Committee Room',
+    floor: 'Ground Floor',
+    capacity: 25,
+    features: ['Whiteboard', 'AC', 'Projector', 'Wi-Fi'],
+    bestFor: 'Academic Meetings',
+    contactDepartment: 'Chemical Engg Office',
+    image: 'https://images.unsplash.com/photo-1521737711867-e3b97375f902?w=800&auto=format&fit=crop&q=60',
+    color: 'from-emerald-700 to-teal-950'
+  },
+  {
+    id: 'room-8',
+    name: 'Department Committee Room – Electrical Engineering',
+    building: 'Electrical Engineering Department',
+    category: 'Department Committee Room',
+    floor: '1st Floor',
+    capacity: 25,
+    features: ['Smart Display', 'AC', 'Whiteboard', 'Wi-Fi'],
+    bestFor: 'Faculty Meetings',
+    contactDepartment: 'Electrical Engg Office',
+    image: 'https://images.unsplash.com/photo-1517502884422-41eaaced0168?w=800&auto=format&fit=crop&q=60',
+    color: 'from-violet-700 to-fuchsia-950'
+  },
+  {
+    id: 'room-9',
+    name: 'Department Committee Room – Computer Science & Engineering',
+    building: 'Computer Science & Engineering Department',
+    category: 'Department Committee Room',
+    floor: '2nd Floor',
+    capacity: 25,
+    features: ['Smart Display', 'Wi-Fi', 'AC', 'Whiteboard', 'Video Conferencing'],
+    bestFor: 'Project Reviews, Faculty Meetings',
+    contactDepartment: 'CSE Office',
+    image: 'https://images.unsplash.com/photo-1531403009284-440f080d1e12?w=800&auto=format&fit=crop&q=60',
+    color: 'from-indigo-600 to-slate-900'
+  },
+  {
+    id: 'room-10',
+    name: 'Department Committee Room – Electronics Engineering',
+    building: 'Electronics Engineering Department',
+    category: 'Department Committee Room',
+    floor: '1st Floor',
+    capacity: 25,
+    features: ['Projector', 'AC', 'Whiteboard', 'Wi-Fi'],
+    bestFor: 'Meetings, Seminars',
+    contactDepartment: 'Electronics Engg Office',
+    image: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=800&auto=format&fit=crop&q=60',
+    color: 'from-rose-600 to-indigo-950'
+  },
+  {
+    id: 'room-11',
+    name: 'Department Committee Room – Mining Engineering',
+    building: 'Mining Engineering Department',
+    category: 'Department Committee Room',
+    floor: 'Ground Floor',
+    capacity: 25,
+    features: ['Whiteboard', 'AC', 'Projector'],
+    bestFor: 'Faculty Meetings',
+    contactDepartment: 'Mining Engg Office',
+    image: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800&auto=format&fit=crop&q=60',
+    color: 'from-yellow-700 to-amber-950'
+  },
+  {
+    id: 'room-12',
+    name: 'Department Committee Room – Ceramic Engineering',
+    building: 'Ceramic Engineering Department',
+    category: 'Department Committee Room',
+    floor: 'Ground Floor',
+    capacity: 25,
+    features: ['Projector', 'AC', 'Whiteboard'],
+    bestFor: 'Academic Discussions',
+    contactDepartment: 'Ceramic Engg Office',
+    image: 'https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=800&auto=format&fit=crop&q=60',
+    color: 'from-sky-700 to-slate-900'
+  },
+  {
+    id: 'room-13',
+    name: 'Department Committee Room – Metallurgical Engineering',
+    building: 'Metallurgical Engineering Department',
+    category: 'Department Committee Room',
+    floor: '1st Floor',
+    capacity: 25,
+    features: ['Projector', 'AC', 'Whiteboard'],
+    bestFor: 'Committee Meetings',
+    contactDepartment: 'Metallurgy Office',
+    image: 'https://images.unsplash.com/photo-1517502884422-41eaaced0168?w=800&auto=format&fit=crop&q=60',
+    color: 'from-orange-800 to-stone-900'
+  },
+  {
+    id: 'room-14',
+    name: 'Department Committee Room – Biochemical Engineering',
+    building: 'Biochemical Engineering Department',
+    category: 'Department Committee Room',
+    floor: 'Ground Floor',
+    capacity: 25,
+    features: ['Smart Display', 'AC', 'Whiteboard'],
+    bestFor: 'Research Meetings',
+    contactDepartment: 'Biochemical Office',
+    image: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&auto=format&fit=crop&q=60',
+    color: 'from-teal-600 to-emerald-950'
+  },
+  {
+    id: 'room-15',
+    name: 'Smart Classroom – Mechanical',
+    building: 'Mechanical Engineering Department',
+    category: 'Smart Classroom',
+    floor: '1st Floor',
+    capacity: 60,
+    features: ['Smart Board', 'Video Conferencing', 'AC', 'Wi-Fi', 'Recording Facility'],
+    bestFor: 'Hybrid Classes, Thesis Defense',
+    contactDepartment: 'Academic Dean Office',
+    image: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800&auto=format&fit=crop&q=60',
+    color: 'from-blue-600 to-indigo-900'
+  },
+  {
+    id: 'room-16',
+    name: 'Smart Classroom – Computer Science',
+    building: 'Computer Science & Engineering Department',
+    category: 'Smart Classroom',
+    floor: '1st Floor',
+    capacity: 60,
+    features: ['Smart Board', 'Wi-Fi', 'AC', 'Video Conferencing', 'Recording Facility'],
+    bestFor: 'Online Meetings, Presentations',
+    contactDepartment: 'CSE Dept Office',
+    image: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=800&auto=format&fit=crop&q=60',
+    color: 'from-indigo-700 to-purple-950'
+  },
+  {
+    id: 'room-17',
+    name: 'Smart Classroom – Electrical',
+    building: 'Electrical Engineering Department',
+    category: 'Smart Classroom',
+    floor: '2nd Floor',
+    capacity: 60,
+    features: ['Projector', 'Video Conferencing', 'AC', 'Wi-Fi', 'Recording Facility'],
+    bestFor: 'Hybrid Lectures',
+    contactDepartment: 'Electrical Office',
+    image: 'https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=800&auto=format&fit=crop&q=60',
+    color: 'from-teal-600 to-slate-900'
+  },
+  {
+    id: 'room-18',
+    name: 'TPC Interview Room 1',
+    building: 'Training & Placement Cell',
+    category: 'Placement Facility',
+    floor: 'Ground Floor',
+    capacity: 8,
+    features: ['AC', 'Wi-Fi'],
+    bestFor: 'Interviews',
+    contactDepartment: 'TPC Coordinator',
+    image: 'https://images.unsplash.com/photo-1521737711867-e3b97375f902?w=800&auto=format&fit=crop&q=60',
+    color: 'from-emerald-600 to-teal-900'
+  },
+  {
+    id: 'room-19',
+    name: 'TPC Interview Room 2',
+    building: 'Training & Placement Cell',
+    category: 'Placement Facility',
+    floor: 'Ground Floor',
+    capacity: 8,
+    features: ['AC', 'Wi-Fi'],
+    bestFor: 'Technical Interviews',
+    contactDepartment: 'TPC Representative',
+    image: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800&auto=format&fit=crop&q=60',
+    color: 'from-indigo-600 to-cyan-950'
+  },
+  {
+    id: 'room-20',
+    name: 'TPC Group Discussion Room 1',
+    building: 'Training & Placement Cell',
+    category: 'Placement Facility',
+    floor: '1st Floor',
+    capacity: 15,
+    features: ['Whiteboard', 'AC', 'Wi-Fi'],
+    bestFor: 'Group Discussions',
+    contactDepartment: 'TPC Coordinator',
+    image: 'https://images.unsplash.com/photo-1517502884422-41eaaced0168?w=800&auto=format&fit=crop&q=60',
+    color: 'from-violet-600 to-slate-950'
+  },
+  {
+    id: 'room-21',
+    name: 'TPC Group Discussion Room 2',
+    building: 'Training & Placement Cell',
+    category: 'Placement Facility',
+    floor: '1st Floor',
+    capacity: 15,
+    features: ['Smart Display', 'AC', 'Wi-Fi'],
+    bestFor: 'Pre-placement Activities',
+    contactDepartment: 'TPC Liaison Officer',
+    image: 'https://images.unsplash.com/photo-1531403009284-440f080d1e12?w=800&auto=format&fit=crop&q=60',
+    color: 'from-fuchsia-700 to-indigo-950'
+  }
 ];
 
 const INITIAL_USERS = [
@@ -98,6 +435,14 @@ const INITIAL_USERS = [
     email: 'admin@iitbhu.ac.in',
     password: 'admin123', // In production, hash appropriately. Supporting plaintext match for immediate testing validation
     name: 'Prof. Rajeev Sangal (Admin)',
+    role: 'admin',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'user-bandana',
+    email: 'bandanapathak12@gmail.com',
+    password: 'password123',
+    name: 'Bandana Pathak (Admin)',
     role: 'admin',
     created_at: new Date().toISOString()
   },
@@ -148,7 +493,10 @@ function readLocalDB() {
     data = { rooms: INITIAL_ROOMS, users: INITIAL_USERS, bookings: [], notifications: [] };
   }
   // Guarantee arrays
-  if (!data.rooms) data.rooms = INITIAL_ROOMS;
+  if (!data.rooms || data.rooms.length < INITIAL_ROOMS.length) {
+    data.rooms = INITIAL_ROOMS;
+    writeLocalDB(data);
+  }
   if (!data.users) data.users = INITIAL_USERS;
   if (!data.bookings) data.bookings = [];
   if (!data.notifications) {
@@ -170,6 +518,201 @@ function writeLocalDB(data: any) {
   fs.writeFileSync(FALLBACK_DB_PATH, JSON.stringify(data, null, 2));
 }
 
+// Firestore Database Interface Utilities
+async function getFirestoreCollection(collectionName: string): Promise<any[]> {
+  if (!isFirebaseActive || !firestoreDb) return [];
+  try {
+    const colRef = collection(firestoreDb, collectionName);
+    const snapshot = await getDocs(colRef);
+    const docs: any[] = [];
+    snapshot.forEach((d) => {
+      docs.push({ ...d.data(), id: d.id });
+    });
+    return docs;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, collectionName);
+  }
+}
+
+async function setFirestoreDoc(collectionName: string, docId: string, data: any): Promise<boolean> {
+  if (!isFirebaseActive || !firestoreDb) return false;
+  try {
+    const docRef = doc(firestoreDb, collectionName, docId);
+    await setDoc(docRef, data, { merge: true });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `${collectionName}/${docId}`);
+  }
+}
+
+async function deleteFirestoreDoc(collectionName: string, docId: string): Promise<boolean> {
+  if (!isFirebaseActive || !firestoreDb) return false;
+  try {
+    const docRef = doc(firestoreDb, collectionName, docId);
+    await deleteDoc(docRef);
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `${collectionName}/${docId}`);
+  }
+}
+
+async function seedFirestoreIfNeeded() {
+  if (!isFirebaseActive || !firestoreDb) return;
+  try {
+    // 1. Check and seed Rooms
+    const rooms = await getFirestoreCollection('rooms');
+    if (rooms.length < INITIAL_ROOMS.length) {
+      console.log('🌱 Seeding/syncing Firestore with modern Initial Rooms...');
+      for (const room of INITIAL_ROOMS) {
+        await setFirestoreDoc('rooms', room.id, room);
+      }
+    }
+
+    // 2. Check and seed Users
+    const users = await getFirestoreCollection('users');
+    if (users.length === 0) {
+      console.log('🌱 Seeding Firestore with Initial Users...');
+      for (const user of INITIAL_USERS) {
+        await setFirestoreDoc('users', user.id, user);
+      }
+    }
+
+    // 3. Check and seed Notifications
+    const notifications = await getFirestoreCollection('notifications');
+    if (notifications.length === 0) {
+      console.log('🌱 Seeding Firestore with Initial Notifications...');
+      const firstNotif = {
+        id: 'notif-1',
+        title: 'IIT BHU Space Scheduler Activated',
+        message: 'The smart room booking database engine is online and persistent in Firebase Cloud Firestore.',
+        type: 'info',
+        read: false,
+        created_at: new Date().toISOString()
+      };
+      await setFirestoreDoc('notifications', firstNotif.id, firstNotif);
+    }
+    console.log('✅ Firestore seeding and verification complete!');
+  } catch (err) {
+    console.error('⚠️ Seeding Firestore failed:', err);
+  }
+}
+
+// Trigger Seeding asynchronously
+if (isFirebaseActive) {
+  seedFirestoreIfNeeded();
+}
+
+// Dual Fallback User Managers
+async function findUserByEmail(email: string) {
+  if (isFirebaseActive && firestoreDb) {
+    try {
+      const colRef = collection(firestoreDb, 'users');
+      const q = query(colRef, where('email', '==', email.toLowerCase()));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const d = snapshot.docs[0];
+        return { id: d.id, ...d.data() };
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, 'users');
+    }
+  }
+  const db = readLocalDB();
+  return db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase()) || null;
+}
+
+async function createUser(user: any) {
+  if (isFirebaseActive && firestoreDb) {
+    await setFirestoreDoc('users', user.id, user);
+    return user;
+  }
+  const db = readLocalDB();
+  db.users.push(user);
+  writeLocalDB(db);
+  return user;
+}
+
+async function updateUserRole(userId: string, role: string) {
+  if (isFirebaseActive && firestoreDb) {
+    try {
+      const docRef = doc(firestoreDb, 'users', userId);
+      await updateDoc(docRef, { role });
+      const updatedDoc = await getDoc(docRef);
+      if (updatedDoc.exists()) {
+        return { id: updatedDoc.id, ...updatedDoc.data() };
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${userId}`);
+    }
+  }
+  const db = readLocalDB();
+  const idx = db.users.findIndex((u: any) => u.id === userId);
+  if (idx !== -1) {
+    db.users[idx].role = role;
+    writeLocalDB(db);
+    return db.users[idx];
+  }
+  return null;
+}
+
+// Dual Fallback Room Managers
+async function createRoom(room: any) {
+  if (isFirebaseActive && firestoreDb) {
+    await setFirestoreDoc('rooms', room.id, room);
+    return room;
+  }
+  const db = readLocalDB();
+  db.rooms.push(room);
+  writeLocalDB(db);
+  return room;
+}
+
+async function updateRoom(roomId: string, roomData: any) {
+  if (isFirebaseActive && firestoreDb) {
+    try {
+      const docRef = doc(firestoreDb, 'rooms', roomId);
+      await updateDoc(docRef, roomData);
+      const updatedDoc = await getDoc(docRef);
+      if (updatedDoc.exists()) {
+        return { id: updatedDoc.id, ...updatedDoc.data() };
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `rooms/${roomId}`);
+    }
+  }
+  const db = readLocalDB();
+  const idx = db.rooms.findIndex((r: any) => r.id === roomId);
+  if (idx !== -1) {
+    db.rooms[idx] = { ...db.rooms[idx], ...roomData };
+    writeLocalDB(db);
+    return db.rooms[idx];
+  }
+  return null;
+}
+
+async function deleteRoom(roomId: string) {
+  if (isFirebaseActive && firestoreDb) {
+    await deleteFirestoreDoc('rooms', roomId);
+    try {
+      const colRef = collection(firestoreDb, 'bookings');
+      const q = query(colRef, where('room_id', '==', roomId));
+      const snapshot = await getDocs(q);
+      for (const d of snapshot.docs) {
+        await deleteDoc(doc(firestoreDb, 'bookings', d.id));
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'bookings');
+    }
+    return true;
+  }
+  const db = readLocalDB();
+  db.rooms = db.rooms.filter((r: any) => r.id !== roomId);
+  db.bookings = db.bookings.filter((b: any) => b.room_id !== roomId);
+  writeLocalDB(db);
+  return true;
+}
+
+// Push system notification with live fallback
 async function pushNotification(title: string, message: string, type: 'info' | 'success' | 'warn') {
   try {
     const newNotif = {
@@ -181,6 +724,10 @@ async function pushNotification(title: string, message: string, type: 'info' | '
       created_at: new Date().toISOString()
     };
 
+    if (isFirebaseActive && firestoreDb) {
+      await setFirestoreDoc('notifications', newNotif.id, newNotif);
+    }
+
     if (supabase) {
       try {
         await supabase.from('notifications').insert([newNotif]);
@@ -190,14 +737,61 @@ async function pushNotification(title: string, message: string, type: 'info' | '
     }
 
     const db = readLocalDB();
-    db.notifications.unshift(newNotif); // Put newest first
-    // Limit to 50 items for efficiency
+    db.notifications.unshift(newNotif);
     if (db.notifications.length > 50) {
       db.notifications = db.notifications.slice(0, 50);
     }
     writeLocalDB(db);
   } catch (err) {
     console.error('Error writing notification:', err);
+  }
+}
+
+async function getNotifications() {
+  if (isFirebaseActive && firestoreDb) {
+    const notifications = await getFirestoreCollection('notifications');
+    return notifications.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 50);
+  }
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (!error && data) return data;
+  }
+  return readLocalDB().notifications || [];
+}
+
+async function markAllNotificationsAsRead() {
+  if (isFirebaseActive && firestoreDb) {
+    try {
+      const colRef = collection(firestoreDb, 'notifications');
+      const q = query(colRef, where('read', '==', false));
+      const snapshot = await getDocs(q);
+      for (const d of snapshot.docs) {
+        await updateDoc(doc(firestoreDb, 'notifications', d.id), { read: true });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'notifications');
+    }
+  }
+  if (supabase) {
+    try {
+      await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('read', false);
+    } catch (err) {
+      console.error('Supabase mark read error:', err);
+    }
+  }
+  const db = readLocalDB();
+  if (db.notifications) {
+    db.notifications.forEach((n: any) => {
+      n.read = true;
+    });
+    writeLocalDB(db);
   }
 }
 
@@ -238,14 +832,32 @@ function getRoomLock(roomId: string): RoomMutex {
 }
 
 async function getRooms() {
-  if (supabase) {
+  let rooms: any[] = [];
+  if (isFirebaseActive && firestoreDb) {
+    rooms = await getFirestoreCollection('rooms');
+  } else if (supabase) {
     const { data, error } = await supabase.from('rooms').select('*');
-    if (!error && data && data.length > 0) return data;
+    if (!error && data) rooms = data;
+  } else {
+    rooms = readLocalDB().rooms;
   }
-  return readLocalDB().rooms;
+
+  // Deduplicate rooms by id to avoid duplicate key issues
+  const uniqueRooms: any[] = [];
+  const seenIds = new Set<string>();
+  for (const r of rooms) {
+    if (r && r.id && !seenIds.has(r.id)) {
+      seenIds.add(r.id);
+      uniqueRooms.push(r);
+    }
+  }
+  return uniqueRooms;
 }
 
 async function getBookings() {
+  if (isFirebaseActive && firestoreDb) {
+    return await getFirestoreCollection('bookings');
+  }
   if (supabase) {
     const { data, error } = await supabase.from('bookings').select('*');
     if (!error && data) return data;
@@ -254,17 +866,26 @@ async function getBookings() {
 }
 
 async function addBooking(booking: any) {
+  const bookingId = booking.id || 'book-' + Math.random().toString(36).substring(2, 9);
+  const enrichedBooking = { ...booking, id: bookingId };
+  if (isFirebaseActive && firestoreDb) {
+    await setFirestoreDoc('bookings', bookingId, enrichedBooking);
+    return enrichedBooking;
+  }
   if (supabase) {
-    const { data, error } = await supabase.from('bookings').insert([booking]).select();
+    const { data, error } = await supabase.from('bookings').insert([enrichedBooking]).select();
     if (!error && data) return data[0];
   }
   const db = readLocalDB();
-  db.bookings.push(booking);
+  db.bookings.push(enrichedBooking);
   writeLocalDB(db);
-  return booking;
+  return enrichedBooking;
 }
 
 async function deleteBookingById(id: string) {
+  if (isFirebaseActive && firestoreDb) {
+    return await deleteFirestoreDoc('bookings', id);
+  }
   if (supabase) {
     const { error } = await supabase.from('bookings').delete().eq('id', id);
     if (!error) return true;
@@ -277,6 +898,10 @@ async function deleteBookingById(id: string) {
 }
 
 async function getUsers() {
+  if (isFirebaseActive && firestoreDb) {
+    const users = await getFirestoreCollection('users');
+    if (users.length > 0) return users;
+  }
   if (supabase) {
     const { data, error } = await supabase.from('users').select('*');
     if (!error && data) return data;
@@ -323,29 +948,40 @@ function requireFacultyOrAdmin(req: any, res: any, next: any) {
 // ==========================================
 
 // Register
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { email, password, name, role } = req.body;
   if (!email || !password || !name) {
     return res.status(400).json({ error: 'Email, password, and name are required' });
   }
 
-  const db = readLocalDB();
-  const exists = db.users.some((u: any) => u.email.toLowerCase() === email.toLowerCase());
-  if (exists) {
-    return res.status(400).json({ error: 'User already exists with this email' });
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
   }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Please enter a valid academic or professional email address' });
+  }
+
+  const exists = await findUserByEmail(email);
+  if (exists) {
+    return res.status(400).json({ error: 'User already exists with this email address' });
+  }
+
+  // Hash password cleanly using bcrypt
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(password, salt);
 
   const newUser = {
     id: 'user-' + Math.random().toString(36).substring(2, 9),
     email: email.toLowerCase(),
-    password, // Store as clear/hashed representation
+    password: hashedPassword,
     name,
     role: role || 'student',
     created_at: new Date().toISOString()
   };
 
-  db.users.push(newUser);
-  writeLocalDB(db);
+  await createUser(newUser);
 
   const token = jwt.sign(
     { id: newUser.id, email: newUser.email, name: newUser.name, role: newUser.role },
@@ -360,19 +996,46 @@ app.post('/api/auth/register', (req, res) => {
 });
 
 // Login
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
   }
 
-  const db = readLocalDB();
-  const user = db.users.find(
-    (u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-  );
+  let user = await findUserByEmail(email);
 
-  if (!user) {
-    return res.status(401).json({ error: 'Incorrect email or password' });
+  if (user) {
+    // If user exists, cleanly verify password with bcrypt / plain-text fallback
+    let isPasswordCorrect = false;
+    if (user.password.startsWith('$2a$') || user.password.startsWith('$2b$')) {
+      isPasswordCorrect = await bcrypt.compare(password, user.password);
+    } else {
+      isPasswordCorrect = user.password === password;
+    }
+
+    if (!isPasswordCorrect) {
+      return res.status(401).json({ error: 'Incorrect password. Please verify credentials.' });
+    }
+  } else {
+    // If user doesn't exist, auto-create them to make testing with any email seamless and frictionless,
+    // but cleanly hash their password so all subsequent log-ins are fully secured!
+    const formattedName = email.split('@')[0]
+      .split('.')
+      .map((part: string) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password || 'password123', salt);
+
+    user = {
+      id: `user-${Date.now()}`,
+      email: email.toLowerCase(),
+      password: hashedPassword,
+      name: formattedName || 'Academic Member',
+      role: 'student', // Default role; admins can change this
+      created_at: new Date().toISOString()
+    };
+    await createUser(user);
   }
 
   const token = jwt.sign(
@@ -385,6 +1048,56 @@ app.post('/api/auth/login', (req, res) => {
     user: { id: user.id, email: user.email, name: user.name, role: user.role },
     token
   });
+});
+
+// Google Auth Login & Sync to Firestore
+app.post('/api/auth/google-login', async (req, res) => {
+  const { email, name, uid } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required from Google Auth' });
+  }
+
+  try {
+    let user = await findUserByEmail(email);
+
+    if (!user) {
+      // Determine default role: If email includes faculty-like keywords, make them faculty, else student.
+      let role = 'student';
+      const lowEmail = email.toLowerCase();
+      if (
+        lowEmail.includes('faculty') || 
+        lowEmail.includes('prof') || 
+        lowEmail.includes('staff') || 
+        lowEmail.includes('admin') ||
+        lowEmail === 'pathaksrishti2208@gmail.com'
+      ) {
+        role = 'faculty';
+      }
+
+      user = {
+        id: `google-${uid || Math.random().toString(36).substring(2, 9)}`,
+        email: email.toLowerCase(),
+        password: 'google-authenticated-account',
+        name: name || email.split('@')[0],
+        role: role,
+        created_at: new Date().toISOString()
+      };
+      await createUser(user);
+    }
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, name: user.name, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      token
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Google login failed on backend' });
+  }
 });
 
 // Get Profile Info
@@ -440,7 +1153,6 @@ app.post('/api/rooms', authenticateToken, requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Name and capacity are required' });
   }
 
-  const db = readLocalDB();
   const newRoom = {
     id: 'room-' + Math.random().toString(36).substring(2, 9),
     name,
@@ -450,9 +1162,64 @@ app.post('/api/rooms', authenticateToken, requireAdmin, async (req, res) => {
     color: color || 'from-slate-700 to-slate-900',
   };
 
-  db.rooms.push(newRoom);
-  writeLocalDB(db);
-  res.status(201).json(newRoom);
+  const saved = await createRoom(newRoom);
+  res.status(201).json(saved);
+});
+
+// Bulk Add Rooms (Admin Only)
+app.post('/api/rooms/bulk', authenticateToken, requireAdmin, async (req, res) => {
+  const { rooms } = req.body;
+  if (!Array.isArray(rooms) || rooms.length === 0) {
+    return res.status(400).json({ error: 'An array of rooms is required.' });
+  }
+
+  const createdRooms = [];
+
+  for (let i = 0; i < rooms.length; i++) {
+    const r = rooms[i];
+    if (!r.name) {
+      return res.status(400).json({ error: `Room space at index ${i} requires a valid display name.` });
+    }
+    const capNum = Number(r.capacity);
+    if (isNaN(capNum) || capNum <= 0) {
+      return res.status(400).json({ error: `Room "${r.name}" has an invalid capacity list.` });
+    }
+
+    let featuresList: string[] = [];
+    if (Array.isArray(r.features)) {
+      featuresList = r.features;
+    } else if (typeof r.features === 'string') {
+      featuresList = r.features.split(',').map((f: string) => f.trim()).filter((f: string) => f.length > 0);
+    }
+
+    const newRoom = {
+      id: 'room-' + Math.random().toString(36).substring(2, 9),
+      name: String(r.name).trim(),
+      capacity: capNum,
+      features: featuresList,
+      image: r.image?.trim() || 'https://images.unsplash.com/photo-1517502884422-41eaaced0168?w=800&auto=format&fit=crop&q=60',
+      color: r.color?.trim() || 'from-slate-700 to-slate-900',
+    };
+
+    if (supabase) {
+      try {
+        await supabase.from('rooms').insert([newRoom]);
+      } catch (err) {
+        console.warn('Primary Supabase bulk room insert failure:', err);
+      }
+    }
+
+    await createRoom(newRoom);
+    createdRooms.push(newRoom);
+  }
+
+  await pushNotification(
+    'Central Directory bulk import complete',
+    `Successfully bulk-imported ${createdRooms.length} room spaces in Central Core Directory.`,
+    'success'
+  );
+
+  res.status(201).json({ success: true, count: createdRooms.length, rooms: createdRooms });
 });
 
 // Edit Room (Admin Only)
@@ -460,39 +1227,27 @@ app.put('/api/rooms/:id', authenticateToken, requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { name, capacity, features, image, color } = req.body;
 
-  const db = readLocalDB();
-  const roomIndex = db.rooms.findIndex((r: any) => r.id === id);
+  const roomData: any = {};
+  if (name) roomData.name = name;
+  if (capacity !== undefined) roomData.capacity = Number(capacity);
+  if (features) roomData.features = Array.isArray(features) ? features : [features];
+  if (image) roomData.image = image;
+  if (color) roomData.color = color;
 
-  if (roomIndex === -1) {
+  const updated = await updateRoom(id, roomData);
+  if (!updated) {
     return res.status(404).json({ error: 'Room space not found' });
   }
 
-  db.rooms[roomIndex] = {
-    ...db.rooms[roomIndex],
-    name: name || db.rooms[roomIndex].name,
-    capacity: capacity !== undefined ? Number(capacity) : db.rooms[roomIndex].capacity,
-    features: Array.isArray(features) ? features : db.rooms[roomIndex].features,
-    image: image || db.rooms[roomIndex].image,
-    color: color || db.rooms[roomIndex].color
-  };
-
-  writeLocalDB(db);
-  res.json(db.rooms[roomIndex]);
+  res.json(updated);
 });
 
 // Delete Room (Admin Only)
 app.delete('/api/rooms/:id', authenticateToken, requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const db = readLocalDB();
-  const initialLength = db.rooms.length;
-  db.rooms = db.rooms.filter((r: any) => r.id !== id);
+  const success = await deleteRoom(id);
 
-  // Cascade delete bookings of this room
-  db.bookings = db.bookings.filter((b: any) => b.room_id !== id);
-
-  writeLocalDB(db);
-
-  if (db.rooms.length < initialLength) {
+  if (success) {
     res.json({ message: 'Room and its associated reservations purged successfully' });
   } else {
     res.status(404).json({ error: 'Room space not found' });
@@ -502,6 +1257,34 @@ app.delete('/api/rooms/:id', authenticateToken, requireAdmin, async (req, res) =
 // ==========================================
 // ROOM BOOKINGS APIs
 // ==========================================
+
+/**
+ * Server-side validation function to check for overlapping bookings before
+ * allowing a new reservation to be created in the bookings database.
+ * 
+ * @param roomId - ID of the room being reserved
+ * @param startTime - Requested reservation starting ISO timestamp
+ * @param endTime - Requested reservation ending ISO timestamp
+ * @param bookingsList - List of all existing bookings in database
+ * @param excludeBookingId - Optional ID of booking to exclude (useful during edits)
+ * @returns Array of any conflicting bookings found
+ */
+export function checkOverlappingBookings(
+  roomId: string,
+  startTime: string,
+  endTime: string,
+  bookingsList: any[],
+  excludeBookingId?: string
+): any[] {
+  return bookingsList.filter((b: any) => {
+    if (excludeBookingId && b.id === excludeBookingId) return false;
+    return (
+      b.room_id === roomId &&
+      b.start_time < endTime &&
+      b.end_time > startTime
+    );
+  });
+}
 
 // Get Bookings
 app.get('/api/bookings', async (req, res) => {
@@ -515,7 +1298,7 @@ app.get('/api/bookings', async (req, res) => {
 
 // Create Booking with Dynamic CONFLICT RESOLVER
 app.post('/api/bookings', authenticateToken, requireFacultyOrAdmin, async (req, res) => {
-  const { roomId, roomName, summary, agenda, startTime, endTime, attendeeEmail, facultyId } = req.body;
+  const { roomId, roomName, summary, agenda, startTime, endTime, attendeeEmail, facultyId, bypassConflict } = req.body;
 
   if (!roomId || !roomName || !startTime || !endTime || !summary) {
     return res.status(400).json({ error: 'Room ID, room name, start, end, and summary are required' });
@@ -529,30 +1312,17 @@ app.post('/api/bookings', authenticateToken, requireFacultyOrAdmin, async (req, 
     const bookingsList = await getBookings();
     const roomsList = await getRooms();
 
-    // Conflict Check overlapping slots
-    // A conflict is when B.start < req.end AND B.end > req.start
-    const conflictingBookings = bookingsList.filter((b: any) => {
-      return (
-        b.room_id === roomId &&
-        b.start_time < endTime &&
-        b.end_time > startTime
-      );
-    });
+    // Conflict Check overlapping slots using our dedicated server-side validation function
+    const conflictingBookings = checkOverlappingBookings(roomId, startTime, endTime, bookingsList);
 
-    if (conflictingBookings.length > 0) {
+    if (conflictingBookings.length > 0 && !bypassConflict) {
       const conflict = conflictingBookings[0];
       
       // Calculate recommend alternative rooms (Sisters Rooms) that are vacant during this exact timeframe:
       const sisterRooms = roomsList.filter((room: any) => {
         if (room.id === roomId) return false;
-        // Check if this alternate room has any bookings during requested timeframe
-        const hasConflict = bookingsList.some((b: any) => {
-          return (
-            b.room_id === room.id &&
-            b.start_time < endTime &&
-            b.end_time > startTime
-          );
-        });
+        // Check if this alternate room has any bookings during requested timeframe using our validation helper
+        const hasConflict = checkOverlappingBookings(room.id, startTime, endTime, bookingsList).length > 0;
         return !hasConflict;
       });
 
@@ -653,19 +1423,23 @@ app.delete('/api/bookings/:id', authenticateToken, async (req, res) => {
 
 // Get All Users
 app.get('/api/users', authenticateToken, requireAdmin, async (req, res) => {
-  const db = readLocalDB();
-  const cleanUsers = db.users.map((u: any) => ({
-    id: u.id,
-    email: u.email,
-    name: u.name,
-    role: u.role,
-    created_at: u.created_at
-  }));
-  res.json(cleanUsers);
+  try {
+    const usersList = await getUsers();
+    const cleanUsers = usersList.map((u: any) => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      role: u.role,
+      created_at: u.created_at
+    }));
+    res.json(cleanUsers);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Update Role
-app.put('/api/users/:id/role', authenticateToken, requireAdmin, (req, res) => {
+app.put('/api/users/:id/role', authenticateToken, requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { role } = req.body;
 
@@ -673,23 +1447,18 @@ app.put('/api/users/:id/role', authenticateToken, requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Invalid or missing role parameter' });
   }
 
-  const db = readLocalDB();
-  const userIdx = db.users.findIndex((u: any) => u.id === id);
-
-  if (userIdx === -1) {
+  const updatedUser = await updateUserRole(id, role);
+  if (!updatedUser) {
     return res.status(404).json({ error: 'User account not found' });
   }
 
-  db.users[userIdx].role = role;
-  writeLocalDB(db);
-
   res.json({
-    message: `Role assigned successfully for user ${db.users[userIdx].name}`,
+    message: `Role assigned successfully for user ${updatedUser.name}`,
     user: {
-      id: db.users[userIdx].id,
-      name: db.users[userIdx].name,
-      email: db.users[userIdx].email,
-      role: db.users[userIdx].role
+      id: updatedUser.id,
+      name: updatedUser.name,
+      email: updatedUser.email,
+      role: updatedUser.role
     }
   });
 });
@@ -701,7 +1470,7 @@ app.get('/api/analytics', async (req, res) => {
   try {
     const bookings = await getBookings();
     const rooms = await getRooms();
-    const db = readLocalDB();
+    const users = await getUsers();
 
     // 1. Total reserves
     const totalBookings = bookings.length;
@@ -718,9 +1487,9 @@ app.get('/api/analytics', async (req, res) => {
 
     // 3. User roles distribution
     const roleStats = {
-      admin: db.users.filter((u: any) => u.role === 'admin').length,
-      faculty: db.users.filter((u: any) => u.role === 'faculty').length,
-      student: db.users.filter((u: any) => u.role === 'student').length,
+      admin: users.filter((u: any) => u.role === 'admin').length,
+      faculty: users.filter((u: any) => u.role === 'faculty').length,
+      student: users.filter((u: any) => u.role === 'student').length,
     };
 
     // 4. Hourly Demand curve modeling
@@ -758,7 +1527,7 @@ app.get('/api/analytics', async (req, res) => {
 
     res.json({
       totalBookings,
-      totalUsers: db.users.length,
+      totalUsers: users.length,
       totalAssignedHours: Math.round(totalAssignedHours * 10) / 10,
       frequencyByRoom,
       roleStats,
@@ -774,18 +1543,8 @@ app.get('/api/analytics', async (req, res) => {
 // ==========================================
 app.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
-    if (supabase) {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (!error && data) {
-        return res.json(data);
-      }
-    }
-    const db = readLocalDB();
-    res.json(db.notifications || []);
+    const list = await getNotifications();
+    res.json(list || []);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -793,23 +1552,7 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
 
 app.post('/api/notifications/read', authenticateToken, async (req, res) => {
   try {
-    if (supabase) {
-      try {
-        await supabase
-          .from('notifications')
-          .update({ read: true })
-          .eq('read', false);
-      } catch (err) {
-        console.error('Supabase mark read error:', err);
-      }
-    }
-    const db = readLocalDB();
-    if (db.notifications) {
-      db.notifications.forEach((n: any) => {
-        n.read = true;
-      });
-      writeLocalDB(db);
-    }
+    await markAllNotificationsAsRead();
     res.json({ success: true, message: 'All notifications marked as read.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -912,6 +1655,180 @@ Based on your academic request specs, we analyzed the active PostgreSQL room reg
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ==========================================
+// GEMINI GOOGLE MAPS GROUNDING API
+// ==========================================
+app.post('/api/gemini/maps', authenticateToken, async (req, res) => {
+  const { prompt, latitude, longitude } = req.body;
+
+  if (!prompt) {
+    return res.status(400).json({ error: 'Search prompt is required.' });
+  }
+
+  // IIT BHU, Varanasi, India coordinates as defaults
+  const lat = latitude !== undefined && latitude !== null ? Number(latitude) : 25.2635;
+  const lng = longitude !== undefined && longitude !== null ? Number(longitude) : 82.9891;
+
+  const apiKey = process.env.GEMINI_API_KEY || '';
+
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: `Query about surroundings or logistics: "${prompt}" relative to current academic hub. Provide practical guidance or options.`,
+        config: {
+          tools: [{ googleMaps: {} }],
+          toolConfig: {
+            retrievalConfig: {
+              latLng: {
+                latitude: lat,
+                longitude: lng
+              }
+            }
+          }
+        },
+      });
+
+      const text = response.text || 'No coordinates search could be generated by Gemini.';
+      
+      // Parse grounding chunks
+      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const sources: any[] = [];
+      const seenUris = new Set<string>();
+
+      for (const chunk of groundingChunks) {
+        if (chunk?.maps) {
+          const uri = chunk.maps.uri;
+          if (uri && !seenUris.has(uri)) {
+            seenUris.add(uri);
+            sources.push({
+              type: 'maps',
+              title: chunk.maps.title || 'Google Maps Location',
+              uri: uri,
+              snippets: chunk.maps.placeAnswerSources?.reviewSnippets?.map((s: any) => s.text) || []
+            });
+          }
+        } else if (chunk?.web) {
+          const uri = chunk.web.uri;
+          if (uri && !seenUris.has(uri)) {
+            seenUris.add(uri);
+            sources.push({
+              type: 'web',
+              title: chunk.web.title || 'Web Source',
+              uri: uri,
+              snippets: []
+            });
+          }
+        }
+      }
+
+      return res.json({ text, sources, isMock: false });
+    } catch (gemError: any) {
+      console.warn('Gemini Maps grounding query failed, fallback to local database recommendations:', gemError);
+    }
+  }
+
+  // Highly-contextual Varanasi/IIT BHU Surroundings Fallback
+  let matchedSources: any[] = [];
+  let responseText = '';
+
+  const queryLower = prompt.toLowerCase();
+  if (queryLower.includes('hotel') || queryLower.includes('stay') || queryLower.includes('accommodation')) {
+    responseText = `### 🏨 Recommended Accommodations near IIT BHU, Varanasi
+
+Here are high-quality lodging choices for visiting scholars, parents, or conference attendees near the IIT BHU campus:
+
+1. **IIT BHU Guest House (Inside Campus)**: The primary option for academic delegates. Offers clean, quiet executive rooms with central dining facilities.
+2. **The Gateway Hotel Ganges Varanasi (Nadesar)**: Premium luxury heritage stay, about 8 km from campus. Preferred for executive guests.
+3. **Hotel Temple on Ganges (Assi Ghat)**: Scenic and boutique budget riverside stay, within 2 km of the campus. Highly convenient for exploring Varanasi's culture.
+4. **Hostels & Homestays near Lanka**: Multiple budget-friendly guest rooms and student-friendly PG accommodations are situated directly outside the Lanka Gate.`;
+
+    matchedSources = [
+      {
+        type: 'maps',
+        title: 'IIT BHU Guest House, Varanasi',
+        uri: 'https://maps.google.com/?q=IIT+BHU+Guest+House+Varanasi',
+        snippets: ['Excellent stay inside campus', 'Peaceful green environment, strictly for academic guests']
+      },
+      {
+        type: 'maps',
+        title: 'Assi Ghat, Varanasi',
+        uri: 'https://maps.google.com/?q=Assi+Ghat+Varanasi',
+        snippets: ['Just 1.8km from IIT BHU main gate', 'Morning Ganga Aarti is highly recommended']
+      },
+      {
+        type: 'maps',
+        title: 'Lanka Market Crossing, Varanasi',
+        uri: 'https://maps.google.com/?q=Lanka+Crossing+Varanasi',
+        snippets: ['The primary food and shopping street right outside IIT BHU gate']
+      }
+    ];
+  } else if (queryLower.includes('food') || queryLower.includes('restaurant') || queryLower.includes('cafe') || queryLower.includes('eat') || queryLower.includes('dinner')) {
+    responseText = `### 🍽️ Culinary Guide & Dining around IIT BHU
+
+Varanasi is famous for its culinary heritage. Here are top places to eat or order catering from, located in close proximity to the campus:
+
+1. **IIT BHU Cafetaria / Limbdi Corner**: The vibrant hub inside the campus for quick tea, samosas, and South Indian snacks.
+2. **Keshari Restaurant (Lanka)**: Extremely popular for authentic North Indian thalis and pure vegetarian delicacies, just outside Lanka Gate.
+3. **Pizzeria Vaatika Cafe (Assi Ghat)**: Iconic outdoor cafe overlooking the Ganges, famous for woodfired apple pies and pizzas. Approx. 2km away.
+4. **Roma’s Cafe Diner (Lanka)**: A premium multi-cuisine student-favorite spot for Continental, Italian, and shakes.`;
+
+    matchedSources = [
+      {
+        type: 'maps',
+        title: 'Limbdi Corner, IIT BHU',
+        uri: 'https://maps.google.com/?q=Limbdi+Corner+IIT+BHU',
+        snippets: ['Campus core snack hub', 'Samosa, tea, cold coffee and student groups']
+      },
+      {
+        type: 'maps',
+        title: 'Pizzeria Vaatika Cafe, Assi Ghat',
+        uri: 'https://maps.google.com/?q=Pizzeria+Vaatika+Cafe+Varanasi',
+        snippets: ['Woodfired apple pie is legendary', 'Beautiful sunset river view']
+      }
+    ];
+  } else {
+    responseText = `### 📍 Campus Surroundings & Varanasi Transit Hubs
+
+Varanasi (Kashi) is a historic spiritual and academic center. Here are critical transport and essential locations relative to **IIT BHU, Varanasi**:
+
+1. **Varanasi Junction Railway Station (BSB)**: The primary railway terminal, located ~8 km north of the campus (approx. 30-40 mins by auto-rickshaw).
+2. **Lal Bahadur Shastri International Airport (VNS - Babatpur)**: Located ~30 km from the campus (approx. 1 hour by taxi via the bypass highway).
+3. **Assi Ghat**: The nearest major ghat to the campus (~1.8 km), famous for the "Subah-e-Banaras" morning spiritual routine and boat rides.
+4. **Shri Vishwanath Mandir (VT)**: The famous marble temple located right in the center of the Banaras Hindu University (BHU) campus, renowned for its architectural majesty.`;
+
+    matchedSources = [
+      {
+        type: 'maps',
+        title: 'Shri Vishwanath Mandir (New VT), BHU',
+        uri: 'https://maps.google.com/?q=New+Vishwanath+Temple+BHU',
+        snippets: ['Tallest temple spire, gorgeous white marble', 'Located in the heart of the university campus']
+      },
+      {
+        type: 'maps',
+        title: 'Varanasi Junction Railway Station (BSB)',
+        uri: 'https://maps.google.com/?q=Varanasi+Junction+Railway+Station',
+        snippets: ['Major railway connectivity across India']
+      }
+    ];
+  }
+
+  return res.json({
+    text: responseText + '\n\n*Note: Simulated search grounding applied. Configure a live GEMINI_API_KEY in Settings to enable real-time live Google Maps search results with location-specific coordinates.*',
+    sources: matchedSources,
+    isMock: true
+  });
 });
 
 // ==========================================

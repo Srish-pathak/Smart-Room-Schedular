@@ -6,9 +6,10 @@ import { motion } from 'motion/react';
 
 interface DriveWidgetProps {
   receiptLogs: { roomName: string; summary: string; start: string; end: string; agenda?: string }[];
+  addToast?: (message: string, type?: 'success' | 'info' | 'error') => void;
 }
 
-export default function DriveWidget({ receiptLogs }: DriveWidgetProps) {
+export default function DriveWidget({ receiptLogs, addToast }: DriveWidgetProps) {
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,14 +121,27 @@ export default function DriveWidget({ receiptLogs }: DriveWidgetProps) {
         await DriveAPI.createLogFile(agendaFilename, agendaHtml);
       }
 
-      alert(
-        hasAgenda
-          ? `Success! Both the receipt and the meeting agenda documents have been saved to your Google Drive.`
-          : `Success! File "${filename}" saved inside your Google Drive.`
-      );
+      if (addToast) {
+        addToast(
+          hasAgenda
+            ? `Success! Both the receipt and the meeting agenda documents have been saved to your Google Drive.`
+            : `Success! File "${filename}" saved inside your Google Drive.`,
+          'success'
+        );
+      } else {
+        alert(
+          hasAgenda
+            ? `Success! Both the receipt and the meeting agenda documents have been saved to your Google Drive.`
+            : `Success! File "${filename}" saved inside your Google Drive.`
+        );
+      }
       fetchDriveFiles();
     } catch (err: any) {
-      alert(err.message || 'Failed to create Drive doc.');
+      if (addToast) {
+        addToast(err.message || 'Failed to create Drive doc.', 'error');
+      } else {
+        alert(err.message || 'Failed to create Drive doc.');
+      }
     } finally {
       setSavingLog(false);
     }
@@ -147,10 +161,18 @@ export default function DriveWidget({ receiptLogs }: DriveWidgetProps) {
     try {
       await DriveAPI.createLogFile(fullFilename, customContent);
       setCustomContent('');
-      alert(`File "${fullFilename}" successfully created in Google Drive!`);
+      if (addToast) {
+        addToast(`File "${fullFilename}" successfully created in Google Drive!`, 'success');
+      } else {
+        alert(`File "${fullFilename}" successfully created in Google Drive!`);
+      }
       fetchDriveFiles();
     } catch (err: any) {
-      alert(err.message || 'Creation failed.');
+      if (addToast) {
+        addToast(err.message || 'Creation failed.', 'error');
+      } else {
+        alert(err.message || 'Creation failed.');
+      }
     } finally {
       setSavingLog(false);
     }

@@ -1,0 +1,170 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "An academic member of the IIT BHU Space Scheduler application.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique user ID"
+        },
+        "email": {
+          "type": "string",
+          "description": "Academic or professional email address"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the member"
+        },
+        "role": {
+          "type": "string",
+          "description": "Role of the user (admin, faculty, student)"
+        },
+        "password": {
+          "type": "string",
+          "description": "Hashed password of the user"
+        },
+        "created_at": {
+          "type": "string",
+          "description": "ISO timestamp of registration"
+        }
+      },
+      "required": ["id", "email", "name", "role", "password", "created_at"]
+    },
+    "Room": {
+      "title": "Room",
+      "description": "A smart room space or lecture hall available for booking.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique room ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the room"
+        },
+        "capacity": {
+          "type": "integer",
+          "description": "Seating capacity"
+        },
+        "features": {
+          "type": "array",
+          "description": "List of room amenities"
+        },
+        "image": {
+          "type": "string",
+          "description": "Display image URL or reference"
+        },
+        "color": {
+          "type": "string",
+          "description": "Visual theme color scheme for the room card"
+        }
+      },
+      "required": ["id", "name", "capacity", "features"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "An allocated reservation slot for a room space.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique booking identifier"
+        },
+        "room_id": {
+          "type": "string",
+          "description": "Associated room identifier"
+        },
+        "user_id": {
+          "type": "string",
+          "description": "Identifier of user who made the reservation"
+        },
+        "title": {
+          "type": "string",
+          "description": "Subject/Title of the reservation"
+        },
+        "purpose": {
+          "type": "string",
+          "description": "Extended explanation or agenda of the meeting"
+        },
+        "start_time": {
+          "type": "string",
+          "description": "ISO start datetime string or clock hour"
+        },
+        "end_time": {
+          "type": "string",
+          "description": "ISO end datetime string or clock hour"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date format YYYY-MM-DD"
+        },
+        "status": {
+          "type": "string",
+          "description": "Approval/usage status (pending, approved, rejected)"
+        },
+        "attendees": {
+          "type": "integer",
+          "description": "Expected head count"
+        },
+        "created_at": {
+          "type": "string",
+          "description": "Timestamp of creation"
+        }
+      },
+      "required": ["id", "room_id", "user_id", "title", "start_time", "end_time", "date"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "A system broadcast or user-specific alert message.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique alert ID"
+        },
+        "title": {
+          "type": "string",
+          "description": "Heading of the alert"
+        },
+        "message": {
+          "type": "string",
+          "description": "Informational body of the alert"
+        },
+        "type": {
+          "type": "string",
+          "description": "Alert status type (info, success, warn)"
+        },
+        "read": {
+          "type": "boolean",
+          "description": "Whether the user has marked it read"
+        },
+        "created_at": {
+          "type": "string",
+          "description": "Timestamp of creation"
+        }
+      },
+      "required": ["id", "title", "message", "type", "read", "created_at"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "Collection of academic scheduler users"
+    },
+    "rooms": {
+      "schema": "Room",
+      "description": "Collection of lecture halls and meeting rooms"
+    },
+    "bookings": {
+      "schema": "Booking",
+      "description": "Collection of room reservations"
+    },
+    "notifications": {
+      "schema": "Notification",
+      "description": "Collection of system alerts and activity notifications"
+    }
+  }
+}

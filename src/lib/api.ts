@@ -135,6 +135,13 @@ export const authAPI = {
     });
   },
 
+  async googleLogin(payload: any) {
+    return request('/api/auth/google-login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
   async getMe() {
     if (isSupabaseConfigured && supabase) {
       const token = getSessionToken();
@@ -238,6 +245,26 @@ export const roomsAPI = {
     });
   },
 
+  async bulkCreate(rooms: any[]) {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('rooms')
+        .insert(rooms)
+        .select();
+      
+      if (error) {
+        throw reportSupabaseError(error, 'Bulk Create Rooms');
+      }
+      return data;
+    }
+
+    // Fallback:
+    return request('/api/rooms/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ rooms }),
+    });
+  },
+
   async delete(id: string) {
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase
@@ -303,7 +330,7 @@ export const bookingsAPI = {
 
   async create(payload: any) {
     if (isSupabaseConfigured && supabase) {
-      const { roomId, roomName, summary, agenda, startTime, endTime, attendeeEmail, facultyId } = payload;
+      const { roomId, roomName, summary, agenda, startTime, endTime, attendeeEmail, facultyId, bypassConflict } = payload;
       
       const token = getSessionToken();
       if (!token) throw new Error('Unauthenticated');
@@ -341,7 +368,7 @@ export const bookingsAPI = {
         );
       });
 
-      if (conflictingBookings.length > 0) {
+      if (conflictingBookings.length > 0 && !bypassConflict) {
         const conflict = conflictingBookings[0];
         
         // Sibling recommended alternative rooms
@@ -626,6 +653,12 @@ export const geminiAPI = {
   async recommend(payload: { eventType: string; participants: number; equipment: string }) {
     // Recommend queries keep the secret GEMINI_API_KEY server-side so we proxy via Express proxy explicitly.
     return request('/api/gemini/recommend', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  async queryMaps(payload: { prompt: string; latitude?: number; longitude?: number }) {
+    return request('/api/gemini/maps', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
