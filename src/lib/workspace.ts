@@ -167,6 +167,47 @@ export const CalendarAPI = {
     });
   },
 
+  async updateEvent(eventId: string, booking: Omit<Booking, 'id'>): Promise<any> {
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=all`;
+    const descriptionLines = [
+      `Smart Room Booking for ${booking.roomName || (booking as any).room_name}.`,
+      `Booked by Faculty/User: ${booking.creatorName || (booking as any).creator_name} (${booking.creatorEmail || (booking as any).creator_email}).`,
+    ];
+    if (booking.facultyId || (booking as any).faculty_id) {
+      descriptionLines.push(`Faculty Name/ID: ${booking.facultyId || (booking as any).faculty_id}`);
+    }
+    if (booking.attendeeEmail || (booking as any).attendee_email) {
+      descriptionLines.push(`Added Attendee: ${booking.attendeeEmail || (booking as any).attendee_email}`);
+    }
+
+    const attendees = [
+      { email: booking.creatorEmail || (booking as any).creator_email, displayName: booking.creatorName || (booking as any).creator_name }
+    ];
+    if (booking.attendeeEmail || (booking as any).attendee_email) {
+      attendees.push({ email: booking.attendeeEmail || (booking as any).attendee_email, displayName: 'Meeting Attendee' });
+    }
+
+    const payload = {
+      summary: `[Scheduled] ${booking.summary}`,
+      location: booking.roomName || (booking as any).room_name,
+      description: descriptionLines.join('\n'),
+      start: {
+        dateTime: booking.startTime || (booking as any).start_time,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      end: {
+        dateTime: booking.endTime || (booking as any).end_time,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      attendees,
+    };
+
+    return googleFetch(url, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
   async deleteEvent(eventId: string): Promise<void> {
     const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`;
     await googleFetch(url, {

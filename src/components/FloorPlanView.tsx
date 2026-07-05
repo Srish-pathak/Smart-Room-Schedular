@@ -107,22 +107,18 @@ interface FloorPlanViewProps {
   rooms: Room[];
   filteredRooms: Room[];
   adminBookings: any[];
-  syncingBookingId: string | null;
   onChooseSlot: (room: Room) => void;
   onViewHistory: (room: Room) => void;
   onShowQR: (room: Room) => void;
-  onAddToGoogleCalendar: (booking: any) => Promise<void>;
 }
 
 export function FloorPlanView({
   rooms,
   filteredRooms,
   adminBookings,
-  syncingBookingId,
   onChooseSlot,
   onViewHistory,
   onShowQR,
-  onAddToGoogleCalendar
 }: FloorPlanViewProps) {
   // Bind database rooms to static coordinates, matching by substring or ID index
   const { mappedSlots, overflowRooms } = useMemo(() => {
@@ -695,26 +691,7 @@ export function FloorPlanView({
                         <span>{new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(b.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
 
-                      {/* Google Calendar sync CTA */}
-                      <div className="pt-1.5 mt-1 border-t border-slate-950/80 flex justify-end">
-                        <button
-                          onClick={() => onAddToGoogleCalendar(b)}
-                          disabled={syncingBookingId === b.id}
-                          className="flex items-center gap-1 py-0.5 px-2 bg-indigo-950/60 hover:bg-indigo-900 disabled:opacity-50 text-[8.5px] font-extrabold text-indigo-300 rounded border border-indigo-900/30 transition-all uppercase tracking-wider cursor-pointer"
-                        >
-                          {syncingBookingId === b.id ? (
-                            <>
-                              <Loader2 className="w-2 h-2 animate-spin text-indigo-400" />
-                              <span>Syncing...</span>
-                            </>
-                          ) : (
-                            <>
-                              <CalendarPlus className="w-2.5 h-2.5 text-indigo-400" />
-                              <span>Add to GCal</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
+
                     </div>
                   ))}
                   {activeRoomBookings.length > 3 && (

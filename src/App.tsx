@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { initAuth, googleSignIn, logout, resetGoogleSignInLock } from './lib/auth';
-import { CalendarAPI } from './lib/workspace';
+import { initAuth, logout } from './lib/auth';
 import { Room } from './types';
 import { FloorPlanView } from './components/FloorPlanView';
 import {
@@ -8,39 +7,24 @@ import {
   roomsAPI,
   bookingsAPI,
   adminAPI,
-  analyticsAPI,
   notificationsAPI,
+  checkInAPI,
+  auditAPI,
   setSessionToken,
   getSessionToken
 } from './lib/api';
 import { supabase, isSupabaseConfigured, subscribeToSupabaseErrors } from './lib/supabaseClient';
 
 // Components
+import { CalendarAPI } from './lib/workspace';
 import CalendarWidget from './components/CalendarWidget';
-import DriveWidget from './components/DriveWidget';
-import GmailWidget from './components/GmailWidget';
-import ChatWidget from './components/ChatWidget';
-import FormsWidget from './components/FormsWidget';
-import OccupancyChart from './components/OccupancyChart';
 import QRCodeSVG from './components/QRCodeSVG';
-import { AIWidget } from './components/AIWidget';
-
-// Recharts for statistical graphs
-import {
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell
-} from 'recharts';
+import QRScannerModal from './components/QRScannerModal';
+import { LoginView } from './components/LoginView';
+import { ConfirmModal } from './components/ConfirmModal';
+import { ActivityHistoryDrawer } from './components/ActivityHistoryDrawer';
+import { RoomDetailsDrawer } from './components/RoomDetailsDrawer';
+import { AdminPanel } from './components/AdminPanel';
 
 // Icons
 import {
@@ -82,6 +66,7 @@ import {
   Sliders,
   Bell,
   CheckSquare,
+  Scan,
   Sun,
   Moon,
   ExternalLink,
@@ -101,93 +86,15 @@ import {
   BookOpen,
   Heart,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Phone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
 
-interface WorkspaceGateProps {
-  activeTab: string;
-  isIframe: boolean;
-  onLink: () => void;
-  onBypass?: () => void;
-  isLinking?: boolean;
-}
 
-function WorkspaceGate({ activeTab, isIframe, onLink, onBypass, isLinking }: WorkspaceGateProps) {
-  return (
-    <div className="max-w-xl mx-auto my-12 p-8 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-6 relative overflow-hidden">
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
-      <div className="w-16 h-16 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto border border-indigo-500/20">
-        <Link2 className="w-8.5 h-8.5 text-indigo-400 animate-pulse" />
-      </div>
-      <div className="space-y-2 relative z-10">
-        <h2 className="text-xl font-bold tracking-tight text-white capitalize">Google {activeTab} Sync Desk</h2>
-        <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
-          Access to the {activeTab} workspace and real-time smart integration features requires you to link and synchronize your authenticated Google credentials.
-        </p>
-      </div>
-
-      <div className="space-y-3 relative z-10">
-        <button
-          onClick={onLink}
-          disabled={isLinking}
-          className={`w-full py-3 bg-indigo-600 hover:bg-indigo-550 text-white font-semibold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer mx-auto ${
-            isLinking ? 'opacity-70 cursor-not-allowed' : ''
-          }`}
-        >
-          {isLinking ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Link2 className="w-4 h-4" />
-          )}
-          <span>{isLinking ? 'Linking Google Account...' : 'Link Google Workspace Now'}</span>
-        </button>
-
-        {onBypass && (
-          <button
-            onClick={onBypass}
-            disabled={isLinking}
-            className={`w-full py-2.5 bg-slate-950/80 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-amber-400/90 hover:text-amber-300 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer mx-auto shadow-md ${
-              isLinking ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-            title="Bypass popup requirements and simulate Google Workspace for evaluation inside the sandbox"
-          >
-            <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span>Simulate / Bypass Popup (Demo Mode)</span>
-          </button>
-        )}
-      </div>
-
-      {isIframe && (
-        <div className="bg-amber-950/40 border border-amber-900/40 p-5 rounded-2xl text-left space-y-2.5 relative z-10 mt-4">
-          <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5 font-mono uppercase tracking-wider">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>Iframe Sandbox Warning</span>
-          </div>
-          <p className="text-[10.5px] leading-relaxed text-amber-400/80">
-            Since this application is loaded inside an iframe on <strong>Google AI Studio</strong>, your browser's security blocks standard Google login popup windows by default.
-          </p>
-          <div className="p-2.5 bg-amber-950/60 rounded-xl border border-amber-850/20 text-[10.5px] font-semibold text-amber-250 leading-relaxed">
-            💡 <strong>Solution:</strong> Look at the <strong>toolbar / tabs in Google AI Studio</strong> (top right) and click the <strong>"Open in New Tab"</strong> button. Linking and synchronizing will work perfectly from there!
-          </div>
-          {onBypass && (
-            <div className="pt-1.5 border-t border-amber-900/40">
-              <button
-                onClick={onBypass}
-                className="w-full py-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
-              >
-                <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                <span>Instantly Bypass with Demo Sync</span>
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function App() {
   // DB & Auth states
@@ -220,19 +127,9 @@ export default function App() {
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
-  const [registerRole, setRegisterRole] = useState<'student' | 'faculty' | 'admin'>('student');
+  const [registerRole, setRegisterRole] = useState<'user' | 'admin'>('user');
 
-  // Google Workspace account bind state
-  const [googleWorkspaceLinked, setGoogleWorkspaceLinked] = useState<boolean>(() => {
-    if (!sessionStorage.getItem('google_workspace_access_token')) {
-      sessionStorage.setItem('google_workspace_access_token', 'mock_google_workspace_token');
-    }
-    return true;
-  });
-  const [googleProfile, setGoogleProfile] = useState<any>(null);
   const [isIframe, setIsIframe] = useState(false);
-
-  const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
 
   // Resilient Custom Confirmation Modal state to replace window.confirm blocks (which crash inside sandbox iframes)
   const [confirmModal, setConfirmModal] = useState<{
@@ -275,7 +172,7 @@ export default function App() {
       return unique;
     });
   };
-  const [activeTab, setActiveTab] = useState<'rooms' | 'calendar' | 'drive' | 'gmail' | 'chat' | 'forms' | 'analytics' | 'admin' | 'ai' | 'about' | 'contact'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'calendar' | 'admin'>('rooms');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [compareRooms, setCompareRooms] = useState<Room[]>([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -322,10 +219,6 @@ export default function App() {
   const [confirmRoomSelection, setConfirmRoomSelection] = useState<Room | null>(null);
   const [preselectedRoomId, setPreselectedRoomId] = useState<string>('');
 
-  // Lifted logs to avoid state loss on tab switching
-  const [chatLog, setChatLog] = useState<{ space: string; text: string; time: string }[]>([]);
-  const [gmailLog, setGmailLog] = useState<{ to: string; subject: string; body: string; time: string }[]>([]);
-
   // Action feedback Toast state
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'info' | 'error' }[]>([]);
 
@@ -334,29 +227,17 @@ export default function App() {
   const [selectedRoomForHistory, setSelectedRoomForHistory] = useState<Room | null>(null);
   const [selectedRoomForDetails, setSelectedRoomForDetails] = useState<Room | null>(null);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [historyPeriodFilter, setHistoryPeriodFilter] = useState<'all' | 'odd-25' | 'even-26' | 'summer-26' | 'ay-26-27' | 'custom'>('all');
+  const [historyStartDate, setHistoryStartDate] = useState('');
+  const [historyEndDate, setHistoryEndDate] = useState('');
   const [isScanningSimulated, setIsScanningSimulated] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
+  const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
 
   // Admin section lists
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [adminBookings, setAdminBookings] = useState<any[]>([]);
-
-  // Admin New Room form
-  const [adminRoomName, setAdminRoomName] = useState('');
-  const [adminRoomCapacity, setAdminRoomCapacity] = useState(30);
-  const [adminRoomFeatures, setAdminRoomFeatures] = useState('');
-  const [adminRoomImage, setAdminRoomImage] = useState('');
-  const [adminRoomColor, setAdminRoomColor] = useState('from-slate-700 to-slate-900');
-
-  // Admin Bulk Room CSV import states
-  const [adminRoomTab, setAdminRoomTab] = useState<'single' | 'bulk'>('single');
-  const [csvText, setCsvText] = useState('');
-  const [dragActive, setDragActive] = useState(false);
-  const [parsedRooms, setParsedRooms] = useState<any[]>([]);
-  const [csvErrors, setCsvErrors] = useState<string[]>([]);
-
-  // Deep Analytics stats
-  const [analyticsStats, setAnalyticsStats] = useState<any>(null);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   // Current local live formatted clock
   const [currentTime, setCurrentTime] = useState('');
@@ -400,7 +281,6 @@ export default function App() {
           if (meResponse && meResponse.user) {
             setUser(meResponse.user);
             setNeedsAuth(false);
-            setGoogleWorkspaceLinked(true);
             fetchDashboardModels(meResponse.user.role);
             addToast(`Welcome back, ${meResponse.user.name}!`, 'success');
           } else {
@@ -431,51 +311,13 @@ export default function App() {
     }, 4500);
   };
 
-  const [syncingBookingId, setSyncingBookingId] = useState<string | null>(null);
 
-  const handleAddToGoogleCalendar = async (b: any) => {
-    const confirmed = window.confirm(`Would you like to sync the reservation "${b.summary}" to your Google Calendar?`);
-    if (!confirmed) return;
-
-    setSyncingBookingId(b.id);
-    try {
-      await CalendarAPI.createEvent({
-        roomName: b.room_name || 'Classroom/Lab Space',
-        summary: b.summary,
-        startTime: b.start_time,
-        endTime: b.end_time,
-        creatorName: b.creator_name || 'Authorized Scholar',
-        creatorEmail: b.creator_email || 'authenticated@iitbhu.ac.in',
-        facultyId: b.faculty_id,
-        attendeeEmail: b.attendee_email,
-      });
-      addToast(`Sync Successful! "${b.summary}" has been added to your Google Calendar.`, 'success');
-    } catch (err: any) {
-      console.error('Google Calendar Sync Error:', err);
-      const lower = err.message?.toLowerCase() || '';
-      if (lower.includes('token') || lower.includes('auth') || lower.includes('credential') || lower.includes('sign in')) {
-        const relink = window.confirm('Your Google Workspace link is expired or required. Would you like to connect your Google account now?');
-        if (relink) {
-          await linkGoogleWorkspaceAccount();
-        }
-      } else {
-        addToast(`Google Calendar Sync Error: ${err.message || err}`, 'error');
-      }
-    } finally {
-      setSyncingBookingId(null);
-    }
-  };
 
   // Register centralized error listener for Supabase cloud queries and network operations failures
   useEffect(() => {
     const unsubscribe = subscribeToSupabaseErrors((message) => {
       addToast(message, 'error');
     });
-
-    const handleGoogleTokenInvalid = () => {
-      setGoogleWorkspaceLinked(false);
-      addToast('Your Google Workspace session has expired or is invalid. Please link your account again.', 'error');
-    };
 
     const handleSyncStatus = (event: Event) => {
       const customEvent = event as CustomEvent;
@@ -497,14 +339,12 @@ export default function App() {
       addToast('Network connection lost. Safe-routing cached directory activated.', 'info');
     };
 
-    window.addEventListener('google-token-invalid', handleGoogleTokenInvalid);
     window.addEventListener('iitbhu_sync_status', handleSyncStatus);
     window.addEventListener('online', handleOnlineStatus);
     window.addEventListener('offline', handleOfflineStatus);
 
     return () => {
       unsubscribe();
-      window.removeEventListener('google-token-invalid', handleGoogleTokenInvalid);
       window.removeEventListener('iitbhu_sync_status', handleSyncStatus);
       window.removeEventListener('online', handleOnlineStatus);
       window.removeEventListener('offline', handleOfflineStatus);
@@ -514,35 +354,53 @@ export default function App() {
   const fetchDashboardModels = async (role: string) => {
     try {
       // 1. Fetch live rooms
-      const list = await roomsAPI.list();
-      setRooms(Array.isArray(list) ? list : []);
+      try {
+        const list = await roomsAPI.list();
+        setRooms(Array.isArray(list) ? list : []);
+      } catch (err: any) {
+        console.error('Failed loading rooms list:', err);
+        addToast(`Failed loading rooms: ${err.message || err}`, 'error');
+      }
 
       // 2. Fetch live bookings
-      const bookings = await bookingsAPI.list();
-      setAdminBookings(Array.isArray(bookings) ? bookings : []);
-
-      // 3. Fetch analytics
-      const stats = await analyticsAPI.getStats();
-      setAnalyticsStats(stats);
+      try {
+        const bookings = await bookingsAPI.list();
+        setAdminBookings(Array.isArray(bookings) ? bookings : []);
+      } catch (err: any) {
+        console.error('Failed loading bookings list:', err);
+        addToast(`Failed loading bookings: ${err.message || err}`, 'error');
+      }
 
       // 4. Fetch admin users state
       if (role === 'admin') {
-        const uList = await adminAPI.listUsers();
-        setAdminUsers(Array.isArray(uList) ? uList : []);
+        try {
+          const uList = await adminAPI.listUsers();
+          setAdminUsers(Array.isArray(uList) ? uList : []);
+        } catch (err: any) {
+          console.error('Failed loading admin users list:', err);
+          addToast(`Failed loading users: ${err.message || err}`, 'error');
+        }
+
+        try {
+          const logs = await auditAPI.listLogs();
+          setAuditLogs(Array.isArray(logs) ? logs : []);
+        } catch (err: any) {
+          console.warn('Could not populate audit logs:', err);
+        }
       }
 
       // 5. Fetch live notifications
       try {
         const notifList = await notificationsAPI.list();
         setNotifications(Array.isArray(notifList) ? notifList : []);
-      } catch (ne) {
+      } catch (ne: any) {
         console.warn('Could not populate live notifications:', ne);
       }
 
       // Reset auto-refresh timer upon successful fetch
       setRoomsRefreshCountdown(60);
     } catch (err: any) {
-      console.error('Failed loading resources:', err);
+      console.error('Failed loading resources general error:', err);
     }
   };
 
@@ -677,40 +535,7 @@ export default function App() {
   // ==========================================
   // SIGN IN & REGISTRATION CONTROLLERS
   // ==========================================
-  const handleGoogleSignIn = async () => {
-    setIsLoggingIn(true);
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        // Authenticate Google user with full-stack backend, registering them if needed
-        const response = await authAPI.googleLogin({
-          email: result.user.email,
-          name: result.user.displayName || result.user.email?.split('@')[0] || 'IIT BHU User',
-          uid: result.user.uid,
-          photoURL: result.user.photoURL,
-        });
-        
-        setSessionToken(response.token, true);
-        setUser(response.user);
-        setToken(response.token);
-        
-        // Auto link Workspace credentials
-        sessionStorage.setItem('google_workspace_access_token', result.accessToken);
-        setGoogleProfile(result.user);
-        setGoogleWorkspaceLinked(true);
-        
-        setNeedsAuth(false);
-        addToast(`Successfully identified as ${response.user.name} via secure Google Auth!`, 'success');
-        fetchDashboardModels(response.user.role);
-      }
-    } catch (err: any) {
-      resetGoogleSignInLock();
-      const msg = err instanceof Error ? err.message : 'Google authentication dismissed or blocked.';
-      addToast(msg, 'error');
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
+
 
   const handleCredentialsLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -766,256 +591,38 @@ export default function App() {
         sessionStorage.removeItem('google_workspace_access_token');
         setUser(null);
         setToken(null);
-        setGoogleWorkspaceLinked(false);
         setNeedsAuth(true);
         addToast('Credentials session closed safely.', 'info');
       }
     });
   };
 
-  const bypassGoogleWorkspaceAuthSimulated = () => {
-    const mockUser = {
-      displayName: user?.name || 'Prof. Rajeev Kumar',
-      email: user?.email || 'rajeev.kumar@iitbhu.ac.in',
-      photoURL: null,
-      uid: 'mock-google-user-id'
-    };
-    sessionStorage.setItem('google_workspace_access_token', 'mock_google_workspace_token');
-    setGoogleProfile(mockUser);
-    setGoogleWorkspaceLinked(true);
-    addToast('Bypassed browser blocker! Google Workspace Simulator active inside sandbox.', 'success');
-  };
 
-  const linkGoogleWorkspaceAccount = async () => {
-    if (isLinkingGoogle) return;
-    setIsLinkingGoogle(true);
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        sessionStorage.setItem('google_workspace_access_token', result.accessToken);
-        setGoogleProfile(result.user);
-        setGoogleWorkspaceLinked(true);
-        addToast('Google Workspace authentication linked! Active widgets enabled.', 'success');
-      }
-    } catch (err: any) {
-      resetGoogleSignInLock();
-      const msg = err instanceof Error ? err.message : 'Popup blocker active or login dismissed.';
-      
-      // Intercept and detect popup blocks typical in Google AI Studio iframes
-      const lowerMsg = msg.toLowerCase();
-      const isPopupBlock = 
-        isIframe ||
-        lowerMsg.includes('popup') || 
-        lowerMsg.includes('blocked') || 
-        lowerMsg.includes('timeout') ||
-        lowerMsg.includes('timed out') ||
-        lowerMsg.includes('cancelled-popup') ||
-        lowerMsg.includes('closed') ||
-        lowerMsg.includes('progress') ||
-        lowerMsg.includes('already in progress');
 
-      if (isPopupBlock) {
-        console.warn('Iframe Google popup block/timeout intercepted. Auto-activating Workspace Simulator Fallback.', err);
-        bypassGoogleWorkspaceAuthSimulated();
-      } else {
-        console.warn('Unexpected google link warning:', err);
-        addToast(msg, 'info');
-      }
-    } finally {
-      setIsLinkingGoogle(false);
-    }
-  };
+  const triggerFastCheckIn = async (room: Room) => {
+    // Find an ongoing/upcoming booking for this user in this room
+    const matchingBooking = adminBookings.find((b: any) => {
+      if (b.room_id !== room.id) return false;
+      const start = new Date(b.start_time);
+      const end = new Date(b.end_time);
+      const now = new Date();
+      const allowedStart = new Date(start.getTime() - 30 * 60 * 1000);
+      return now >= allowedStart && now <= end;
+    });
 
-  const triggerFastCheckIn = (room: Room) => {
-    // 1. Flip room state to booked visually
-    setRooms((prev) =>
-      prev.map((r) => (r.id === room.id ? { ...r, status: 'booked' } : r))
-    );
-
-    // 2. Add announcement in Chat
-    const timestampStr = new Date().toLocaleTimeString();
-    const checkInMessage = `📢 QR Mobile Sensor Check-In: ${user?.name || 'Authorized User'} has checked in to "${room.name}" via QR placa reader. DB status marked: [OCCUPIED]`;
-    setChatLog((prev) => [
-      {
-        space: 'General Space Alerts',
-        text: checkInMessage,
-        time: timestampStr,
-      },
-      ...prev,
-    ]);
-
-    // 3. Add email log list
-    const emailSubject = `[Live Sensor Alert] Desk Checked: ${room.name}`;
-    const emailBody = `Automated check-in trace at IIT BHU.\n\nUser ${user?.name} has authorized check-in utilizing the dynamic QR generator. Space status is now reserved in SQL schemas.`;
-    setGmailLog((prev) => [
-      {
-        to: 'classroom-mgmt@iitbhu.ac.in',
-        subject: emailSubject,
-        body: emailBody,
-        time: timestampStr,
-      },
-      ...prev,
-    ]);
-
-    addToast(`⚡ RAPID Check-In success for ${room.name}!`);
-  };
-
-  // ==========================================
-  // ROOM INVENTORY ADD/EDIT (Admin Role)
-  // ==========================================
-  const handleAdminAddRoom = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const payload = {
-        name: adminRoomName,
-        capacity: Number(adminRoomCapacity),
-        features: adminRoomFeatures.split(',').map(f => f.trim()).filter(Boolean),
-        image: adminRoomImage || undefined,
-        color: adminRoomColor
-      };
-      await roomsAPI.create(payload);
-      addToast(`New space "${adminRoomName}" created successfully!`, 'success');
-      setAdminRoomName('');
-      setAdminRoomFeatures('');
-      fetchDashboardModels(user.role);
-    } catch (err: any) {
-      addToast(`Admin operation error: ${err.message}`, 'error');
-    }
-  };
-
-  const handleParseCsv = (text: string) => {
-    try {
-      const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-      if (lines.length === 0) {
-        setParsedRooms([]);
-        setCsvErrors(['No content provided.']);
-        return;
-      }
-
-      // Check header
-      const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
-      const requiredHeaders = ['name', 'capacity'];
-      const missing = requiredHeaders.filter(h => !headers.includes(h));
-      if (missing.length > 0) {
-        setCsvErrors([`Missing required column headers: ${missing.join(', ')}. Please supply "name" and "capacity".`]);
-        setParsedRooms([]);
-        return;
-      }
-
-      const tempRooms: any[] = [];
-      const tempErrors: string[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        // Split on comma, ignoring commas that are inside quotes
-        const rawLine = lines[i];
-        const parts: string[] = [];
-        let current = '';
-        let inQuotes = false;
-        
-        for (let j = 0; j < rawLine.length; j++) {
-          const char = rawLine[j];
-          if (char === '"') {
-            inQuotes = !inQuotes;
-          } else if (char === ',' && !inQuotes) {
-            parts.push(current.trim());
-            current = '';
-          } else {
-            current += char;
-          }
-        }
-        parts.push(current.trim());
-
-        const cols = parts.map(c => c.trim().replace(/^["']|["']$/g, ''));
-        const roomObj: any = {};
-        
-        headers.forEach((header, index) => {
-          roomObj[header] = cols[index] || '';
-        });
-
-        const rowNum = i + 1;
-        if (!roomObj.name) {
-          tempErrors.push(`Row ${rowNum}: Name column can never be blank.`);
-          continue;
-        }
-
-        const capNum = Number(roomObj.capacity);
-        if (isNaN(capNum) || capNum <= 0) {
-          tempErrors.push(`Row ${rowNum}: Capacity expects a positive integer. Value supplied: "${roomObj.capacity}".`);
-          continue;
-        }
-
-        let featuresArr: string[] = [];
-        if (roomObj.features) {
-          if (roomObj.features.includes(';')) {
-            featuresArr = roomObj.features.split(';').map((f: string) => f.trim()).filter(Boolean);
-          } else if (roomObj.features.includes('|')) {
-            featuresArr = roomObj.features.split('|').map((f: string) => f.trim()).filter(Boolean);
-          } else {
-            featuresArr = roomObj.features.split(',').map((f: string) => f.trim()).filter(Boolean);
-          }
-        }
-
-        tempRooms.push({
-          name: roomObj.name,
-          capacity: capNum,
-          features: featuresArr,
-          image: roomObj.image || undefined,
-          color: roomObj.color || 'from-slate-700 to-slate-900',
-        });
-      }
-
-      setCsvErrors(tempErrors);
-      setParsedRooms(tempRooms);
-    } catch (err: any) {
-      setCsvErrors([`CSV Parsing Failed: ${err.message}`]);
-      setParsedRooms([]);
-    }
-  };
-
-  const handleAdminBulkImportRooms = async () => {
-    if (parsedRooms.length === 0) {
-      addToast('No parsed rooms to import. Try pasting or uploading valid CSV data first!', 'info');
+    if (!matchingBooking) {
+      addToast(`No active or upcoming reservation found for "${room.name}" within the check-in window (starts 30 mins before start).`, 'error');
       return;
     }
-    try {
-      await roomsAPI.bulkCreate(parsedRooms);
-      addToast(`Bulk import completed successfully! ${parsedRooms.length} room spaces initialized.`, 'success');
-      setCsvText('');
-      setParsedRooms([]);
-      setCsvErrors([]);
-      fetchDashboardModels(user.role);
-    } catch (err: any) {
-      addToast(`Bulk entry error: ${err.message}`, 'error');
-    }
-  };
 
-  const handleAdminDeleteRoom = async (id: string, name: string) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Decommission Smart Space?',
-      message: `Are you sure you want to permanently decommission "${name}"?\n\nThis is a highly destructive database operation that will instantly purge all academic Schedules and student Bookings linked with this room space.`,
-      confirmText: 'Decommission',
-      cancelText: 'Cancel',
-      isDanger: true,
-      onConfirm: async () => {
-        try {
-          await roomsAPI.delete(id);
-          addToast(`Space ${name} decommissioned from database.`, 'success');
-          fetchDashboardModels(user.role);
-        } catch (err: any) {
-          addToast(err.message, 'error');
-        }
+    try {
+      await checkInAPI.checkIn(matchingBooking.id);
+      addToast(`⚡ Successfully checked in to room "${room.name}"!`, 'success');
+      if (user && user.role) {
+        fetchDashboardModels(user.role);
       }
-    });
-  };
-
-  const handleAdminUpdateUserRole = async (userId: string, targetRole: string) => {
-    try {
-      await adminAPI.updateUserRole(userId, targetRole);
-      addToast('User organizational authorization level changed.', 'success');
-      fetchDashboardModels(user.role);
     } catch (err: any) {
-      addToast(err.message, 'error');
+      addToast(err.message || 'Check-in failed.', 'error');
     }
   };
 
@@ -1109,27 +716,6 @@ export default function App() {
   const handleNewBookingRegistered = (roomName: string, summary: string, start: string, end: string, agenda?: string) => {
     setSessionReceipts((prev) => [...prev, { roomName, summary, start, end, agenda }]);
     
-    // Add dynamically to logs
-    const timestampStr = new Date().toLocaleTimeString();
-    setChatLog((prev) => [
-      {
-        space: 'General Space Alerts',
-        text: `📅 APPROVED: ${summary} has reserved Room: "${roomName}" from ${new Date(start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${new Date(end).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
-        time: timestampStr
-      },
-      ...prev
-    ]);
-
-    setGmailLog((prev) => [
-      {
-        to: user?.email,
-        subject: `[Booking Confirmed] Space Reserved: ${roomName}`,
-        body: `Hello ${user?.name},\n\nYour session reservation coordinates have been secured in our relational database schemas for classroom ${roomName}. You can view receipts in your active dashboard.`,
-        time: timestampStr
-      },
-      ...prev
-    ]);
-
     addToast(`Space reservation secured!`, 'success');
     fetchDashboardModels(user.role);
   };
@@ -1140,13 +726,10 @@ export default function App() {
   };
 
   // Prepopulate form triggers
-  const fillPredefinedCredentials = (role: 'admin' | 'faculty' | 'student') => {
+  const fillPredefinedCredentials = (role: 'admin' | 'user') => {
     if (role === 'admin') {
       setLoginEmail('admin@iitbhu.ac.in');
       setLoginPassword('admin123');
-    } else if (role === 'faculty') {
-      setLoginEmail('faculty@iitbhu.ac.in');
-      setLoginPassword('faculty123');
     } else {
       setLoginEmail('student@iitbhu.ac.in');
       setLoginPassword('student123');
@@ -1158,325 +741,29 @@ export default function App() {
   // ==========================================
   if (needsAuth || !user) {
     return (
-      <div className={`min-h-screen ${isDarkMode ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'} flex flex-col justify-between p-6 relative overflow-hidden font-sans transition-colors duration-300`}>
-        {/* Abstract Architectural Tech Grid */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(13,148,136,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(13,148,136,0.05)_1px,transparent_1px)] bg-[size:3.5rem_3.5rem] pointer-events-none" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(13,148,136,0.08),transparent_60%)] pointer-events-none" />
-        
-        {/* Soft Ambient Glow Elements */}
-        <motion.div 
-          animate={{
-            scale: [1, 1.1, 1],
-            opacity: [0.15, 0.22, 0.15],
-          }}
-          transition={{
-            duration: 10,
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-          className="absolute top-1/4 left-1/4 w-[450px] h-[450px] bg-teal-500/10 rounded-full blur-[130px] pointer-events-none" 
-        />
-        <motion.div 
-          animate={{
-            scale: [1, 1.15, 1],
-            opacity: [0.1, 0.18, 0.1],
-          }}
-          transition={{
-            duration: 12,
-            repeat: Infinity,
-            ease: "easeInOut",
-            delay: 2
-          }}
-          className="absolute bottom-1/4 right-1/4 w-[450px] h-[450px] bg-indigo-500/10 rounded-full blur-[140px] pointer-events-none" 
-        />
-
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full max-w-xl mx-auto pt-2 z-10 relative">
-          <button
-            onClick={toggleDarkMode}
-            className={`self-start sm:self-auto px-3.5 py-1.5 rounded-xl border text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
-              isDarkMode 
-                ? 'border-slate-800 bg-slate-900/80 text-[#dfb965] hover:bg-slate-800' 
-                : 'border-slate-200 bg-white/80 text-[#0a4735] hover:bg-stone-50'
-            }`}
-            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          >
-            {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-            <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
-          </button>
-
-          <div className={`self-end sm:self-auto text-right font-mono text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} flex items-center gap-2`}>
-            <Clock3 className="w-3.5 h-3.5 text-indigo-505" />
-            <span>BHU Office Clock: {currentTime || 'Loading...'}</span>
-          </div>
-        </div>
-
-        <div className={`max-w-xl w-full mx-auto my-auto ${
-          isDarkMode 
-            ? 'bg-slate-900/65 border-slate-800/80 shadow-indigo-950/25' 
-            : 'bg-white/95 border-slate-200 shadow-slate-200/50'
-        } border rounded-3xl p-8 shadow-2xl relative z-10 space-y-6 backdrop-blur-xl transition-all duration-300`}>
-          <div className="text-center space-y-3.5">
-            <div className={`text-[10px] font-bold ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'} uppercase tracking-widest font-mono`}>
-              Indian Institute of Technology (BHU) Varanasi
-            </div>
-            <h1 className={`text-3xl sm:text-4xl font-display font-extrabold tracking-tight ${
-              isDarkMode 
-                ? 'bg-gradient-to-r from-white via-slate-100 to-indigo-300' 
-                : 'bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900'
-            } bg-clip-text text-transparent`}>
-              IIT BHU Smart Room Scheduler
-            </h1>
-            <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} max-w-sm mx-auto leading-relaxed`}>
-              Full-Stack Room Scheduler with Role-Based Access Control, Persistent PostgreSQL, and optional Google Workspace integrations.
-            </p>
-          </div>
-
-          {/* Tester Helper Cards */}
-          <div className={`p-4 rounded-2xl border ${
-            isDarkMode 
-              ? 'bg-slate-950/60 border-indigo-950/50' 
-              : 'bg-slate-50/80 border-slate-150'
-          } space-y-3`}>
-            <span className={`text-[9.5px] font-bold ${isDarkMode ? 'text-indigo-300' : 'text-indigo-650'} uppercase tracking-widest block font-mono`}>
-              ⚡ Quick Tester Profiles (Click to prefill coordinates):
-            </span>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => fillPredefinedCredentials('admin')}
-                className={`text-[10px] font-semibold py-2 px-2 rounded-xl transition-all border cursor-pointer ${
-                  isDarkMode 
-                    ? 'bg-indigo-950/30 hover:bg-indigo-900/40 border-indigo-900/30 text-indigo-200' 
-                    : 'bg-indigo-50/80 hover:bg-indigo-100 border-indigo-200/60 text-indigo-700'
-                }`}
-              >
-                Prof. Rajeev (Admin)
-              </button>
-              <button
-                type="button"
-                onClick={() => fillPredefinedCredentials('faculty')}
-                className={`text-[10px] font-semibold py-2 px-2 rounded-xl transition-all border cursor-pointer ${
-                  isDarkMode 
-                    ? 'bg-teal-950/30 hover:bg-teal-900/40 border-teal-900/30 text-teal-200' 
-                    : 'bg-teal-50/80 hover:bg-teal-100 border-teal-200/60 text-teal-700'
-                }`}
-              >
-                Dr. S. K. (Faculty)
-              </button>
-              <button
-                type="button"
-                onClick={() => fillPredefinedCredentials('student')}
-                className={`text-[10px] font-semibold py-2 px-2 rounded-xl transition-all border cursor-pointer ${
-                  isDarkMode 
-                    ? 'bg-amber-950/30 hover:bg-amber-900/40 border-amber-900/30 text-amber-200' 
-                    : 'bg-amber-50/80 hover:bg-amber-100 border-amber-200/60 text-amber-700'
-                }`}
-              >
-                Abishek (Student)
-              </button>
-            </div>
-          </div>
-
-          {/* Custom Tabs */}
-          <div className={`flex border-b ${isDarkMode ? 'border-slate-800/80' : 'border-slate-200/80'}`}>
-            <button
-              onClick={() => setIsRegisterMode(false)}
-              className={`flex-1 text-center py-2.5 text-xs font-bold uppercase transition-all cursor-pointer ${
-                !isRegisterMode 
-                  ? 'text-indigo-500 border-b-2 border-indigo-500' 
-                  : (isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-500')
-              }`}
-            >
-              Credentials Sign In
-            </button>
-            <button
-              onClick={() => setIsRegisterMode(true)}
-              className={`flex-1 text-center py-2.5 text-xs font-bold uppercase transition-all cursor-pointer ${
-                isRegisterMode 
-                  ? 'text-indigo-500 border-b-2 border-indigo-500' 
-                  : (isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-500')
-              }`}
-            >
-              Create Account
-            </button>
-          </div>
-
-          {/* Google Sign-In with Firebase Auth (Securely Identify Users) */}
-          <div className="space-y-3 pt-2">
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={isLoggingIn}
-              className={`w-full flex items-center justify-center gap-3 py-3 rounded-xl border font-bold text-xs uppercase tracking-wider transition-all shadow-md active:scale-[0.98] cursor-pointer ${
-                isDarkMode
-                  ? 'border-slate-800 bg-slate-950 text-white hover:bg-slate-900'
-                  : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
-              }`}
-            >
-              <svg className="w-4 h-4 text-indigo-400" viewBox="0 0 24 24">
-                <path
-                  fill="currentColor"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="currentColor"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="currentColor"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                />
-                <path
-                  fill="currentColor"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                />
-              </svg>
-              <span>{isLoggingIn ? 'Connecting...' : 'Secure Sign In with Google'}</span>
-            </button>
-            <div className="relative flex py-2 items-center">
-              <div className={`flex-grow border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}></div>
-              <span className={`flex-shrink mx-4 text-[9px] font-mono font-bold uppercase tracking-widest ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>or use credentials</span>
-              <div className={`flex-grow border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}></div>
-            </div>
-          </div>
-
-          <AnimatePresence mode="wait">
-            {!isRegisterMode ? (
-              <motion.form
-                key="login-form"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                onSubmit={handleCredentialsLogin}
-                className="space-y-4"
-              >
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>
-                    Email Coordinates (Any email works to instantly connect!)
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="Enter any email (e.g. resident@gmail.com)"
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    className={`w-full ${
-                      isDarkMode 
-                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500' 
-                        : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500'
-                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
-                  />
-                </div>
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>
-                    Account Secret Password (Optional - any password works!)
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="Optional (defaults to password123)"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    className={`w-full ${
-                      isDarkMode 
-                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-605 focus:border-indigo-500' 
-                        : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500'
-                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={isLoggingIn}
-                  className="w-full bg-indigo-600 hover:bg-indigo-550 text-white font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition-all shadow-md active:scale-[0.98] cursor-pointer"
-                >
-                  {isLoggingIn ? 'Logging you in...' : 'Sign In Now'}
-                </button>
-              </motion.form>
-            ) : (
-              <motion.form
-                key="register-form"
-                initial={{ opacity: 0, x: 10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -10 }}
-                onSubmit={handleCredentialsRegister}
-                className="space-y-4"
-              >
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>Your Full Name</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Dr. A.K. Tripathi"
-                    value={registerName}
-                    onChange={(e) => setRegisterName(e.target.value)}
-                    className={`w-full ${
-                      isDarkMode 
-                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500' 
-                        : 'bg-slate-50 border-slate-200 text-slate-905 placeholder:text-slate-400 focus:border-indigo-500'
-                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
-                  />
-                </div>
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>IIT Email Address</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="e.g. tripathi.cs@iitbhu.ac.in"
-                    value={registerEmail}
-                    onChange={(e) => setRegisterEmail(e.target.value)}
-                    className={`w-full ${
-                      isDarkMode 
-                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500' 
-                        : 'bg-slate-50 border-slate-200 text-slate-905 placeholder:text-slate-400 focus:border-indigo-500'
-                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
-                  />
-                </div>
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>Create Password</label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="Minimum 6 characters"
-                    value={registerPassword}
-                    onChange={(e) => setRegisterPassword(e.target.value)}
-                    className={`w-full ${
-                      isDarkMode 
-                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500' 
-                        : 'bg-slate-50 border-slate-200 text-slate-905 placeholder:text-slate-400 focus:border-indigo-500'
-                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
-                  />
-                </div>
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} mb-1.5`}>Desired Status Role</label>
-                  <select
-                    value={registerRole}
-                    onChange={(e: any) => setRegisterRole(e.target.value)}
-                    className={`w-full ${
-                      isDarkMode 
-                        ? 'bg-slate-950 border-slate-800/80 text-slate-200 focus:border-indigo-500' 
-                        : 'bg-slate-50 border-slate-250 text-slate-900 focus:border-indigo-505'
-                    } border rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none`}
-                  >
-                    <option value="student">Student Account (Role constraints apply)</option>
-                    <option value="faculty">Faculty Member (Authorization to Reserv rooms)</option>
-                    <option value="admin">Admin Authority (Full Master clearing bounds)</option>
-                  </select>
-                </div>
-                <button
-                  type="submit"
-                  disabled={isLoggingIn}
-                  className="w-full bg-indigo-600 hover:bg-indigo-550 text-white font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition-all shadow-md active:scale-[0.98] cursor-pointer"
-                >
-                  {isLoggingIn ? 'Registering Account...' : 'Create Account & Log In'}
-                </button>
-              </motion.form>
-            )}
-          </AnimatePresence>
-        </div>
-
-        <div className="text-center font-mono text-[9px] text-slate-600 uppercase tracking-widest pt-4">
-          <span>IIT BHU Secure Full-Stack Portal • Academic Scheduling Node</span>
-        </div>
-      </div>
+      <LoginView
+        isDarkMode={isDarkMode}
+        toggleDarkMode={toggleDarkMode}
+        currentTime={currentTime}
+        isRegisterMode={isRegisterMode}
+        setIsRegisterMode={setIsRegisterMode}
+        loginEmail={loginEmail}
+        setLoginEmail={setLoginEmail}
+        loginPassword={loginPassword}
+        setLoginPassword={setLoginPassword}
+        registerName={registerName}
+        setRegisterName={setRegisterName}
+        registerEmail={registerEmail}
+        setRegisterEmail={setRegisterEmail}
+        registerPassword={registerPassword}
+        setRegisterPassword={setRegisterPassword}
+        registerRole={registerRole}
+        setRegisterRole={setRegisterRole}
+        isLoggingIn={isLoggingIn}
+        fillPredefinedCredentials={fillPredefinedCredentials}
+        handleCredentialsLogin={handleCredentialsLogin}
+        handleCredentialsRegister={handleCredentialsRegister}
+      />
     );
   }
 
@@ -1559,26 +846,18 @@ export default function App() {
             </div>
 
             {/* Horizontal Navigation Menu for Desktop */}
-            <nav className="hidden lg:flex items-center gap-1.5">
+            <nav className="hidden lg:flex items-center gap-2 relative">
               {[
-                { label: 'Home', tab: 'rooms', action: () => { setActiveTab('rooms'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
-                { label: 'Rooms & Spaces', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('directory-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
-                { label: 'My Bookings', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('my-bookings-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
-                { label: 'Calendar', tab: 'calendar' },
-                { label: 'Facilities', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('facilities-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
-                { label: 'AI Advisor', tab: 'ai' },
-                { label: 'Workspace Sync', tab: 'drive' },
-                { label: 'Analytics', tab: 'analytics' },
-                ...(user.role === 'admin' ? [{ label: 'Admin Center', tab: 'admin' }] : []),
-                { label: 'About', tab: 'about' },
-                { label: 'Contact', tab: 'contact' }
+                { label: 'Rooms Directory', tab: 'rooms', action: () => { setActiveTab('rooms'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+                { label: 'Interactive Calendar', tab: 'calendar', action: () => { setActiveTab('calendar'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+                ...(user?.role === 'admin' ? [{ label: 'Admin Center', tab: 'admin', action: () => { setActiveTab('admin'); window.scrollTo({ top: 0, behavior: 'smooth' }); } }] : [])
               ].map((item) => {
-                const isActive = activeTab === item.tab || (item.tab === 'drive' && ['drive', 'gmail', 'chat', 'forms'].includes(activeTab));
+                const isActive = activeTab === item.tab;
                 return (
                   <button
                     key={item.label}
-                    onClick={item.action || (() => setActiveTab(item.tab as any))}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${
+                    onClick={item.action}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${
                       isActive
                         ? (isDarkMode ? 'text-white bg-slate-900 border-b-2 border-[#dfb965]' : 'text-[#0a4735] bg-[#faf8f2] border-b-2 border-[#d4af37]')
                         : (isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-900/50' : 'text-[#0a4735]/70 hover:text-[#0a4735] hover:bg-[#faf8f2]/50')
@@ -1673,19 +952,7 @@ export default function App() {
                 </AnimatePresence>
               </div>
 
-              {/* Google Link Connection Badge */}
-              <button
-                onClick={linkGoogleWorkspaceAccount}
-                disabled={isLinkingGoogle}
-                className={`flex items-center gap-1.5 text-[10px] font-extrabold uppercase py-2.5 px-3.5 rounded-xl border transition-all cursor-pointer ${
-                  googleWorkspaceLinked
-                    ? 'bg-[#10b981]/10 text-emerald-400 border-emerald-900/30'
-                    : 'bg-rose-500/10 text-rose-400 border-rose-900/30 animate-pulse'
-                }`}
-              >
-                <Link2 className="w-3.5 h-3.5" />
-                <span>{googleWorkspaceLinked ? 'Google Linked' : 'Link Google'}</span>
-              </button>
+
 
               {/* Luxury Profile Pill */}
               <div className={`flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full border ${
@@ -1698,7 +965,7 @@ export default function App() {
                 </div>
                 <div className="text-left leading-none font-sans">
                   <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user.name}</span>
-                  <span className="text-[9px] text-[#c09728] font-semibold uppercase font-mono">{user.role}</span>
+                  <span className="text-[9px] text-[#c09728] font-semibold uppercase font-mono">{user.role === 'admin' ? 'Platform Admin' : 'User'}</span>
                 </div>
                 <button
                   onClick={handleSignout}
@@ -1766,21 +1033,16 @@ export default function App() {
                 </div>
 
                 {/* Mobile Navigation Links */}
-                <div className="flex flex-col gap-1 text-left">
+                <div className="flex flex-col gap-1.5 text-left">
+                  <div className="px-3 pb-1 text-[9px] font-bold text-slate-500 uppercase tracking-widest font-mono">
+                    Core Dashboard
+                  </div>
                   {[
-                    { label: 'Home Dashboard', tab: 'rooms', action: () => { setActiveTab('rooms'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
-                    { label: 'Rooms Grid', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('directory-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
-                    { label: 'My Bookings', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('my-bookings-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
-                    { label: 'Interactive Calendar', tab: 'calendar' },
-                    { label: 'Highlight Facilities', tab: 'rooms', action: () => { setActiveTab('rooms'); setTimeout(() => document.getElementById('facilities-section')?.scrollIntoView({ behavior: 'smooth' }), 100); } },
-                    { label: 'AI Advisor chatbot', tab: 'ai' },
-                    { label: 'Google Workspace', tab: 'drive' },
-                    { label: 'Analytics Insights', tab: 'analytics' },
-                    ...(user.role === 'admin' ? [{ label: 'Admin Center', tab: 'admin' }] : []),
-                    { label: 'About History', tab: 'about' },
-                    { label: 'Contact Help', tab: 'contact' }
+                    { label: 'Rooms Directory', tab: 'rooms', action: () => { setActiveTab('rooms'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+                    { label: 'Interactive Calendar', tab: 'calendar', action: () => { setActiveTab('calendar'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+                    ...(user.role === 'admin' ? [{ label: 'Admin Center', tab: 'admin', action: () => { setActiveTab('admin'); window.scrollTo({ top: 0, behavior: 'smooth' }); } }] : []),
                   ].map((item) => {
-                    const isActive = activeTab === item.tab || (item.tab === 'drive' && ['drive', 'gmail', 'chat', 'forms'].includes(activeTab));
+                    const isActive = activeTab === item.tab;
                     return (
                       <button
                         key={item.label}
@@ -1789,9 +1051,9 @@ export default function App() {
                           if (item.action) item.action();
                           else setActiveTab(item.tab as any);
                         }}
-                        className={`py-3 px-4 rounded-xl text-xs font-bold uppercase tracking-wider text-left transition-all ${
+                        className={`py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider text-left transition-all ${
                           isActive
-                            ? (isDarkMode ? 'text-white bg-slate-800 border-l-4 border-[#dfb965]' : 'text-[#0a4735] bg-[#faf8f2] border-l-4 border-[#d4af37]')
+                            ? (isDarkMode ? 'text-white bg-slate-850 border-l-4 border-[#dfb965]' : 'text-[#0a4735] bg-[#faf8f2] border-l-4 border-[#d4af37]')
                             : (isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800/40' : 'text-slate-500 hover:text-slate-800 hover:bg-[#faf8f2]/50')
                         }`}
                       >
@@ -1830,61 +1092,22 @@ export default function App() {
                     <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
                   </button>
 
-                  <div className="flex gap-2">
-                    <button
-                      onClick={linkGoogleWorkspaceAccount}
-                      className={`flex-1 py-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider text-center ${
-                        isDarkMode ? 'border-slate-800 text-slate-300 hover:bg-slate-850' : 'border-slate-200 text-slate-700 hover:bg-[#faf8f2]'
-                      }`}
-                    >
-                      Google Sync
-                    </button>
-                    <button
-                      onClick={handleSignout}
-                      className={`flex-grow-0 p-2.5 rounded-xl border ${
-                        isDarkMode ? 'border-slate-800 text-rose-400 hover:bg-rose-950/20' : 'border-slate-200 text-rose-650 hover:bg-rose-50/20'
-                      }`}
-                    >
-                      <LogOut className="w-4 h-4" />
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleSignout}
+                    className={`w-full py-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider text-center flex items-center justify-center gap-1.5 ${
+                      isDarkMode ? 'border-slate-800 text-rose-400 hover:bg-rose-950/20' : 'border-slate-200 text-rose-650 hover:bg-rose-50/20'
+                    }`}
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
                 </div>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Role Test Center floating tray on bottom-left for easy access during inspection */}
-        <div className="fixed bottom-6 left-6 z-40 hidden md:flex items-center gap-2 bg-white/95 border border-[#ead29c] shadow-2xl rounded-2xl p-2.5 backdrop-blur-sm">
-          <span className="text-[9.5px] font-extrabold text-[#0a4735] uppercase font-mono tracking-widest pl-2">
-            Switch Test Role:
-          </span>
-          <div className="flex bg-[#faf8f2] p-1 rounded-xl border border-[#ead29c]/50">
-            {[
-              { role: 'admin', name: 'Prof. Rajeev Kumar', email: 'rajeev.kumar@iitbhu.ac.in', color: 'bg-rose-500/10 text-rose-700' },
-              { role: 'faculty', name: 'Dr. S. K.', email: 'faculty@iitbhu.ac.in', color: 'bg-[#0a4735]/10 text-[#0a4735]' },
-              { role: 'student', name: 'Abishek', email: 'student@iitbhu.ac.in', color: 'bg-[#c09728]/10 text-[#c09728]' }
-            ].map((r) => {
-              const active = user?.role === r.role;
-              return (
-                <button
-                  key={r.role}
-                  onClick={() => {
-                    const nextUser = { ...user, role: r.role, name: r.name, email: r.email };
-                    setUser(nextUser);
-                    fetchDashboardModels(r.role);
-                    addToast(`Role Switched: connected as ${r.name} (${r.role})`, 'success');
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
-                    active ? `${r.color} border border-current shadow-sm` : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  {r.role}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+
 
         {/* Local Storage Caching & Online/Offline synchronization bar */}
         <div className={`py-2.5 px-6 border-b transition-all duration-300 ${
@@ -2049,10 +1272,9 @@ export default function App() {
                     <span className={`text-sm font-bold block truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user.name}</span>
                     <span className={`text-[8.5px] font-extrabold uppercase py-0.5 px-1.5 rounded font-mono inline-block mt-0.5 ${
                       user.role === 'admin' ? (isDarkMode ? 'bg-red-950/80 text-red-300 border border-red-800/35' : 'bg-red-50 text-red-700 border border-red-200') : 
-                      user.role === 'faculty' ? (isDarkMode ? 'bg-teal-950/80 text-teal-350 border border-teal-800/35' : 'bg-teal-50 text-teal-700 border border-teal-200') :
                       (isDarkMode ? 'bg-amber-950/80 text-amber-350 border border-amber-800/35' : 'bg-amber-50 text-amber-700 border border-amber-200')
                     }`}>
-                      {user.role}
+                      {user.role === 'admin' ? 'Platform Admin' : 'User'}
                     </span>
                   </div>
                 </div>
@@ -2061,7 +1283,7 @@ export default function App() {
                 <div className={`pt-3 border-t ${isDarkMode ? 'border-slate-800/60' : 'border-slate-100'} grid grid-cols-2 gap-2 text-center`}>
                   <div className="space-y-0.5">
                     <span className="text-[9px] text-slate-500 block font-mono uppercase">User Level</span>
-                    <strong className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} capitalize`}>{user.role}</strong>
+                    <strong className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} capitalize`}>{user.role === 'admin' ? 'Platform Admin' : 'User'}</strong>
                   </div>
                   <div className="space-y-0.5 border-l border-slate-800/60">
                     <span className="text-[9px] text-slate-500 block font-mono uppercase">Sync State</span>
@@ -2105,68 +1327,20 @@ export default function App() {
                     <span>Calendar Scheduler</span>
                   </button>
 
-                  <button
-                    onClick={() => setActiveTab('ai')}
-                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
-                      activeTab === 'ai'
-                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <Sparkles className="w-4 h-4 text-indigo-400 shrink-0 animate-pulse" />
-                    <span>AI Assistant</span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab('analytics')}
-                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
-                      activeTab === 'analytics'
-                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <Activity className="w-4 h-4 text-rose-450 shrink-0" />
-                    <span>Analytics</span>
-                  </button>
+                  {user?.role === 'admin' && (
+                    <button
+                      onClick={() => setActiveTab('admin')}
+                      className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                        activeTab === 'admin'
+                          ? (isDarkMode ? 'bg-rose-950/30 text-rose-300 border-l-4 border-rose-500 font-bold' : 'bg-rose-50/80 text-rose-700 border-l-4 border-rose-500 font-bold')
+                          : 'text-slate-400 hover:text-rose-450 hover:bg-slate-800/40'
+                      }`}
+                    >
+                      <Shield className="w-4 h-4 text-rose-500 shrink-0" />
+                      <span>Admin Center</span>
+                    </button>
+                  )}
                 </div>
-
-                <div className="px-3 pt-4 pb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono border-t border-slate-850 mt-3">
-                  Google Workspace
-                </div>
-                <div className="space-y-1">
-                  <button
-                    onClick={() => setActiveTab('drive')}
-                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
-                      ['drive', 'gmail', 'chat', 'forms'].includes(activeTab)
-                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <HardDrive className="w-4 h-4 text-emerald-450 shrink-0" />
-                    <span>Workspace Sync</span>
-                  </button>
-                </div>
-
-                {user.role === 'admin' && (
-                  <>
-                    <div className="px-3 pt-4 pb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono border-t border-slate-855 mt-3">
-                      Security & Control
-                    </div>
-                    <div className="space-y-1">
-                      <button
-                        onClick={() => setActiveTab('admin')}
-                        className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
-                          activeTab === 'admin'
-                            ? (isDarkMode ? 'bg-rose-950/30 text-rose-300 border-l-4 border-rose-500 font-bold' : 'bg-rose-50/80 text-rose-700 border-l-4 border-rose-500 font-bold')
-                            : 'text-slate-400 hover:text-rose-400 hover:bg-slate-800/40'
-                        }`}
-                      >
-                        <Shield className="w-4 h-4 text-red-450 shrink-0 animate-pulse" />
-                        <span>Admin Center</span>
-                      </button>
-                    </div>
-                  </>
-                )}
               </div>
             </div>
 
@@ -2198,137 +1372,25 @@ export default function App() {
                     <Calendar className="w-3.5 h-3.5 shrink-0" />
                     <span>Calendar</span>
                   </button>
-                  <button
-                    onClick={() => setActiveTab('ai')}
-                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
-                      activeTab === 'ai'
-                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
-                        : 'border-transparent text-slate-400 hover:text-slate-250'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0 animate-pulse" />
-                    <span>AI Assistant</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('analytics')}
-                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
-                      activeTab === 'analytics'
-                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
-                        : 'border-transparent text-slate-400 hover:text-slate-250'
-                    }`}
-                  >
-                    <Activity className="w-3.5 h-3.5 text-rose-450 shrink-0" />
-                    <span>Analytics</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('drive')}
-                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
-                      ['drive', 'gmail', 'chat', 'forms'].includes(activeTab)
-                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
-                        : 'border-transparent text-slate-400 hover:text-slate-250'
-                    }`}
-                  >
-                    <HardDrive className="w-3.5 h-3.5 text-emerald-450 shrink-0" />
-                    <span>Workspace</span>
-                  </button>
                   {user.role === 'admin' && (
                     <button
                       onClick={() => setActiveTab('admin')}
                       className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
                         activeTab === 'admin'
-                          ? 'border-rose-500 text-rose-200 bg-rose-950/20 font-bold'
-                          : 'border-transparent text-slate-400 hover:text-rose-400'
+                          ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
+                          : 'border-transparent text-slate-400 hover:text-slate-250'
                       }`}
                     >
-                      <Shield className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                      <Shield className="w-3.5 h-3.5 shrink-0 text-rose-450" />
                       <span>Admin</span>
                     </button>
                   )}
                 </div>
               </div>
 
-          {isIframe && !googleWorkspaceLinked && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-amber-950/90 border border-amber-800/60 p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-left relative overflow-hidden shadow-2xl mb-6"
-            >
-              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
-              <div className="flex items-start gap-3 relative z-10">
-                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <h4 className="font-bold text-amber-300 text-xs uppercase tracking-wider font-mono">Google AI Studio Sandbox Guard</h4>
-                  <p className="text-xs text-amber-200/95 leading-relaxed max-w-2xl">
-                    This app experiences iframe restrictions inside Google AI Studio's preview window which may block standard Google SSO popup windows.
-                  </p>
-                  <p className="text-[11.5px] font-semibold text-amber-400/90 leading-relaxed">
-                    💡 <strong>To link successfully:</strong> Click the <strong>"Open in New Tab"</strong> button in the upper-right corner of AI Studio, and link authentication from there!
-                  </p>
-                </div>
-              </div>
-              <button 
-                onClick={() => {
-                  window.open(window.location.href, '_blank');
-                }}
-                className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-[10.5px] uppercase tracking-wider px-4 py-2.5 rounded-xl transition-all shadow-md shrink-0 cursor-pointer flex items-center gap-1.5 select-none relative z-10 ml-auto md:ml-0"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Open In New Tab
-              </button>
-            </motion.div>
-          )}
-
           {/* Active Tab transition bounds */}
           <AnimatePresence mode="wait">
             <div className="space-y-6">
-              {['drive', 'gmail', 'chat', 'forms'].includes(activeTab) && (
-                <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800 w-full max-w-md mx-auto justify-stretch select-none shadow-lg mb-4">
-                  <button
-                    onClick={() => setActiveTab('drive')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10.5px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
-                      activeTab === 'drive'
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <HardDrive className="w-3.5 h-3.5" />
-                    <span>Drive</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('gmail')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10.5px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
-                      activeTab === 'gmail'
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Mail className="w-3.5 h-3.5" />
-                    <span>Gmail</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('chat')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10.5px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
-                      activeTab === 'chat'
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    <span>Chat</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('forms')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10.5px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
-                      activeTab === 'forms'
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    <span>Forms</span>
-                  </button>
-                </div>
-              )}
 
               <motion.div
                 key={activeTab}
@@ -2351,23 +1413,23 @@ export default function App() {
                         <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono">IIT BHU Campus Scheduler 👋</span>
                         <h2 className="text-xl font-extrabold tracking-tight text-white">Need to book an academic space today?</h2>
                         <p className="text-xs text-slate-350 max-w-2xl leading-relaxed">
-                          Welcome, <strong className="text-indigo-300">{user.name}</strong>. Browse live room statuses below. Click <strong className="text-indigo-300">"CHOOSE SLOT"</strong> to customize a schedule inside our interactive calendar, or click <strong className="text-indigo-300 font-bold">"QR Scanner"</strong> to check in instantly!
+                          Welcome, <strong className="text-indigo-300">{user.name}</strong>. Browse live room statuses below. Click <strong className="text-indigo-300">"CHOOSE SLOT"</strong> to customize a schedule inside our interactive calendar, or click <button onClick={() => setIsQRScannerOpen(true)} className="text-indigo-300 font-extrabold hover:underline cursor-pointer bg-transparent border-none p-0 inline font-mono">"QR Scanner"</button> to check in instantly!
                         </p>
                       </div>
-                      <div className="flex items-center gap-2.5 shrink-0">
+                      <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                        <button
+                          onClick={() => setIsQRScannerOpen(true)}
+                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-550 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
+                        >
+                          <Scan className="w-4 h-4" />
+                          <span>QR Scanner</span>
+                        </button>
                         <button
                           onClick={() => setActiveTab('calendar')}
                           className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-550 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
                         >
                           <Plus className="w-4 h-4" />
                           <span>Quick Book</span>
-                        </button>
-                        <button
-                          onClick={() => setActiveTab('ai')}
-                          className="px-4 py-2.5 bg-slate-950/85 hover:bg-slate-900 text-indigo-400 hover:text-indigo-300 border border-slate-800 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2"
-                        >
-                          <Sparkles className="w-4 h-4 text-indigo-400" />
-                          <span>AI Assistant</span>
                         </button>
                       </div>
                     </div>
@@ -2461,27 +1523,111 @@ export default function App() {
                                   <Clock className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                                   <span>{timeStr}</span>
                                 </div>
+
+                                {/* Google Calendar Sync Status for User Bookings */}
+                                <div className="mt-2.5 pt-2.5 border-t border-slate-900 flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[9px] font-mono text-slate-500 uppercase font-bold tracking-wider">Sync:</span>
+                                    {b.google_sync_status === 'synced' ? (
+                                      <span className="text-[10px] text-emerald-400 font-medium bg-emerald-950/40 border border-emerald-900/30 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                        Synced ✓
+                                      </span>
+                                    ) : b.google_sync_status === 'failed' ? (
+                                      <span className="text-[10px] text-rose-400 font-medium bg-rose-950/40 border border-rose-900/30 px-1.5 py-0.5 rounded flex items-center gap-1" title={b.google_sync_error || 'Sync failed'}>
+                                        <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                                        Failed ✕
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-amber-400/80 font-medium bg-amber-950/40 border border-amber-900/30 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                        <span className="w-1 h-1 rounded-full bg-amber-400" />
+                                        Not Synced
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-1">
+                                    {(b.google_sync_status === 'failed' || b.google_sync_status === 'not_connected' || b.google_sync_status === 'not_synced' || !b.google_sync_status) && (
+                                      <button
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          const gToken = sessionStorage.getItem('google_workspace_access_token');
+                                          if (!gToken) {
+                                            addToast('Please connect your Google Account first to resync bookings.', 'info');
+                                            return;
+                                          }
+                                          try {
+                                            addToast('Initiating Google Calendar Sync...', 'info');
+                                            const calEvent = await CalendarAPI.createEvent({
+                                              roomName: b.room_name,
+                                              summary: b.summary,
+                                              startTime: b.start_time,
+                                              endTime: b.end_time,
+                                              agenda: b.agenda || '',
+                                              attendeeEmail: b.attendee_email || '',
+                                              creatorName: b.creator_name,
+                                              creatorEmail: b.creator_email,
+                                            });
+
+                                            if (calEvent && calEvent.id) {
+                                              await bookingsAPI.update(b.id, {
+                                                roomId: b.room_id,
+                                                roomName: b.room_name,
+                                                summary: b.summary,
+                                                agenda: b.agenda,
+                                                startTime: b.start_time,
+                                                endTime: b.end_time,
+                                                attendeeEmail: b.attendee_email,
+                                                facultyId: b.faculty_id,
+                                                google_event_id: calEvent.id,
+                                                google_calendar_link: calEvent.htmlLink || null,
+                                                google_sync_status: 'synced',
+                                                google_sync_error: null,
+                                                bypassConflict: true,
+                                              });
+                                              addToast('Schedules successfully synchronized with Google Calendar!', 'success');
+                                              fetchDashboardModels(user.role);
+                                            }
+                                          } catch (syncErr: any) {
+                                            console.error('Resync failed:', syncErr);
+                                            addToast(`Resync failed: ${syncErr.message || syncErr}`, 'error');
+                                            await bookingsAPI.update(b.id, {
+                                              roomId: b.room_id,
+                                              roomName: b.room_name,
+                                              summary: b.summary,
+                                              agenda: b.agenda,
+                                              startTime: b.start_time,
+                                              endTime: b.end_time,
+                                              attendeeEmail: b.attendee_email,
+                                              facultyId: b.faculty_id,
+                                              google_sync_status: 'failed',
+                                              google_sync_error: syncErr.message || 'Unknown calendar error',
+                                              bypassConflict: true,
+                                            });
+                                            fetchDashboardModels(user.role);
+                                          }
+                                        }}
+                                        className="px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 hover:bg-indigo-900 border border-indigo-800/40 text-[9px] font-semibold cursor-pointer transition-all"
+                                      >
+                                        Resync ↻
+                                      </button>
+                                    )}
+
+                                    {b.google_calendar_link && (
+                                      <a
+                                        href={b.google_calendar_link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-1.5 py-0.5 rounded bg-teal-950 text-teal-300 hover:bg-teal-900 border border-teal-800/40 text-[9px] font-semibold transition-all"
+                                      >
+                                        Open Calendar
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
 
-                              <div className="pt-2.5 border-t border-slate-900/80 flex items-center justify-between gap-2">
-                                <button
-                                  onClick={() => handleAddToGoogleCalendar(b)}
-                                  disabled={syncingBookingId === b.id}
-                                  className="flex-1 py-1.5 px-3 bg-indigo-600 hover:bg-indigo-550 disabled:opacity-50 text-[10px] font-extrabold text-white rounded-xl flex items-center justify-center gap-1.5 transition-all uppercase tracking-wider cursor-pointer shadow-sm"
-                                >
-                                  {syncingBookingId === b.id ? (
-                                    <>
-                                      <Loader2 className="w-3 h-3 animate-spin" />
-                                      <span>Syncing...</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <CalendarPlus className="w-3.5 h-3.5 text-white" />
-                                      <span>Sync to Google</span>
-                                    </>
-                                  )}
-                                </button>
-                                
+                              <div className="pt-2.5 border-t border-slate-900/80">
                                 <button
                                   onClick={() => {
                                     setConfirmModal({
@@ -2494,6 +1640,14 @@ export default function App() {
                                       requiredTextToConfirm: 'DECOMMISSION',
                                       onConfirm: async () => {
                                         try {
+                                          const gToken = sessionStorage.getItem('google_workspace_access_token');
+                                          if (gToken && b.google_event_id) {
+                                            try {
+                                              await CalendarAPI.deleteEvent(b.google_event_id);
+                                            } catch (calErr) {
+                                              console.error('Failed to cancel Google Calendar event:', calErr);
+                                            }
+                                          }
                                           await bookingsAPI.delete(b.id);
                                           addToast('Booking successfully cancelled.', 'success');
                                           fetchDashboardModels(user.role);
@@ -2969,7 +2123,6 @@ export default function App() {
                     rooms={rooms}
                     filteredRooms={filteredRooms}
                     adminBookings={adminBookings}
-                    syncingBookingId={syncingBookingId}
                     onChooseSlot={(room) => {
                       setConfirmRoomSelection(room);
                       setPreselectedRoomId(room.id);
@@ -2979,7 +2132,6 @@ export default function App() {
                       setSelectedQRRoom(room);
                       setScanComplete(false);
                     }}
-                    onAddToGoogleCalendar={handleAddToGoogleCalendar}
                   />
                 )}
                 </div>
@@ -2990,218 +2142,14 @@ export default function App() {
                   ========================================== */}
               {activeTab === 'calendar' && (
                 <div className="space-y-2">
-                  {!googleWorkspaceLinked ? (
-                    <WorkspaceGate
-                      activeTab="calendar"
-                      isIframe={isIframe}
-                      onLink={linkGoogleWorkspaceAccount}
-                      onBypass={bypassGoogleWorkspaceAuthSimulated}
-                      isLinking={isLinkingGoogle}
-                    />
-                  ) : (
-                    <CalendarWidget
-                      rooms={rooms}
-                      userEmail={user.email}
-                      userName={user.name}
-                      onRefreshRoomsStatus={syncRoomsStatusFromCalendar}
-                      onBookingAdded={handleNewBookingRegistered}
-                      defaultSelectedRoomId={preselectedRoomId}
-                    />
-                  )}
-                </div>
-              )}
-
-              {/* ==========================================
-                  TAB: AI ADVISOR RECOMMENDATIONS
-                  ========================================== */}
-              {activeTab === 'ai' && (
-                <div className="space-y-2">
-                  <AIWidget
-                    onPreselectRoom={(roomId) => {
-                      setPreselectedRoomId(roomId);
-                      setActiveTab('calendar');
-                      addToast(`Room selection pre-selected! Configure schedule inside the calendar view.`, 'info');
-                    }}
-                    addToast={addToast}
-                    availableRooms={rooms}
+                  <CalendarWidget
+                    rooms={rooms}
+                    userEmail={user.email}
+                    userName={user.name}
+                    onRefreshRoomsStatus={syncRoomsStatusFromCalendar}
+                    onBookingAdded={handleNewBookingRegistered}
+                    defaultSelectedRoomId={preselectedRoomId}
                   />
-                </div>
-              )}
-
-              {/* ==========================================
-                  TAB: ANALYTICS DASHBOARD
-                  ========================================== */}
-              {activeTab === 'analytics' && (
-                <div className="space-y-6">
-                  <div className="p-4.5 bg-slate-900 rounded-2xl border border-slate-800 text-left">
-                    <h2 className="text-lg font-bold tracking-tight">PostgreSQL Statistical Analysis</h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Aggregated metric distributions derived cleanly from relational tables and query sequences.
-                    </p>
-                  </div>
-
-                  {/* Summary metric cubes */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                    {/* Card 1 */}
-                    <div className={`p-6 rounded-2xl border transition-all duration-300 hover:shadow-lg relative overflow-hidden flex flex-col justify-between h-36 ${
-                      isDarkMode 
-                        ? 'bg-slate-900/60 border-slate-800 hover:border-indigo-500/55' 
-                        : 'bg-white border-slate-200/80 shadow-sm hover:shadow-indigo-100/50 hover:border-indigo-400'
-                    }`}>
-                      <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
-                      <div className="flex items-start justify-between">
-                        <span className={`text-[10px] font-bold tracking-wider font-mono uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>TOTAL BOOKINGS SECURED</span>
-                        <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-indigo-950/60 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
-                          <Calendar className="w-5 h-5" />
-                        </div>
-                      </div>
-                      <div className="mt-4 text-left">
-                        <strong className={`text-3xl font-extrabold tracking-tight block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{analyticsStats?.totalBookings || adminBookings.length}</strong>
-                        <span className="text-[10px] text-emerald-500 font-semibold flex items-center gap-1 mt-1">
-                          <span>↑ 12.4%</span>
-                          <span className={`font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>vs last week</span>
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Card 2 */}
-                    <div className={`p-6 rounded-2xl border transition-all duration-300 hover:shadow-lg relative overflow-hidden flex flex-col justify-between h-36 ${
-                      isDarkMode 
-                        ? 'bg-slate-900/60 border-slate-800 hover:border-violet-500/55' 
-                        : 'bg-white border-slate-200/80 shadow-sm hover:shadow-violet-100/50 hover:border-violet-400'
-                    }`}>
-                      <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/5 rounded-full blur-2xl pointer-events-none" />
-                      <div className="flex items-start justify-between">
-                        <span className={`text-[10px] font-bold tracking-wider font-mono uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>TOTAL ACADEMIC USERS</span>
-                        <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-violet-950/60 text-violet-400' : 'bg-violet-50 text-violet-600'}`}>
-                          <Users className="w-5 h-5" />
-                        </div>
-                      </div>
-                      <div className="mt-4 text-left">
-                        <strong className={`text-3xl font-extrabold tracking-tight block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{analyticsStats?.totalUsers || adminUsers.length || 3}</strong>
-                        <span className="text-[10px] text-emerald-505 font-semibold flex items-center gap-1 mt-1">
-                          <span>Active nodes</span>
-                          <span className={`font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>synchronized</span>
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Card 3 */}
-                    <div className={`p-6 rounded-2xl border transition-all duration-300 hover:shadow-lg relative overflow-hidden flex flex-col justify-between h-36 ${
-                      isDarkMode 
-                        ? 'bg-slate-900/60 border-slate-800 hover:border-amber-500/55' 
-                        : 'bg-white border-slate-200/80 shadow-sm hover:shadow-amber-100/50 hover:border-amber-400'
-                    }`}>
-                      <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
-                      <div className="flex items-start justify-between">
-                        <span className={`text-[10px] font-bold tracking-wider font-mono uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>ALLOCATED HOURS</span>
-                        <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-amber-950/60 text-amber-400' : 'bg-amber-50 text-amber-650'}`}>
-                          <Clock className="w-5 h-5" />
-                        </div>
-                      </div>
-                      <div className="mt-4 text-left">
-                        <strong className={`text-3xl font-extrabold tracking-tight block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{analyticsStats?.totalAssignedHours || 0} Hours</strong>
-                        <span className="text-[10px] text-indigo-405 font-semibold flex items-center gap-1 mt-1">
-                          <span>Weekly block</span>
-                          <span className={`font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>utilization</span>
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Card 4 */}
-                    <div className={`p-6 rounded-2xl border transition-all duration-300 hover:shadow-lg relative overflow-hidden flex flex-col justify-between h-36 ${
-                      isDarkMode 
-                        ? 'bg-slate-900/60 border-slate-800 hover:border-emerald-500/55' 
-                        : 'bg-white border-slate-200/80 shadow-sm hover:shadow-emerald-100/50 hover:border-emerald-400'
-                    }`}>
-                      <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
-                      <div className="flex items-start justify-between">
-                        <span className={`text-[10px] font-bold tracking-wider font-mono uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>SEAT DENSITY INDEX</span>
-                        <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-emerald-950/60 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
-                          <Activity className="w-5 h-5" />
-                        </div>
-                      </div>
-                      <div className="mt-4 text-left">
-                        <strong className={`text-3xl font-extrabold tracking-tight block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>94.2%</strong>
-                        <span className="text-[10px] text-emerald-505 font-semibold flex items-center gap-1 mt-1">
-                          <span>Optimal load</span>
-                          <span className={`font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>registered</span>
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {analyticsStats ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      
-                      {/* Hourly booking demand */}
-                      <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                        <div className="mb-4">
-                          <h3 className="text-sm font-bold text-slate-350 flex items-center gap-1">
-                            <TrendingUp className="w-4 h-4 text-indigo-400" />
-                            Hourly Reservation Demand Wave (8 AM - 8 PM)
-                          </h3>
-                        </div>
-                        <div className="h-[250px] w-full">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={analyticsStats.hourlyDemand}>
-                              <defs>
-                                <linearGradient id="colorHr" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.8}/>
-                                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
-                              <XAxis dataKey="hour" stroke="#64748b" fontSize={9} />
-                              <YAxis stroke="#64748b" fontSize={9} />
-                              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1f2937' }} />
-                              <Area name="Active overlap load" type="monotone" dataKey="bookings" stroke="#6366f1" fillOpacity={1} fill="url(#colorHr)" />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-
-                      {/* User composition Pie */}
-                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
-                        <div>
-                          <h3 className="text-sm font-bold text-slate-350">Credential Roles Decomposition</h3>
-                        </div>
-                        <div className="h-[180px] w-full mt-2">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie
-                                data={[
-                                  { name: 'Admins', value: analyticsStats.roleStats?.admin || 1 },
-                                  { name: 'Faculties', value: analyticsStats.roleStats?.faculty || 1 },
-                                  { name: 'Students', value: analyticsStats.roleStats?.student || 1 },
-                                ]}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={50}
-                                outerRadius={70}
-                                paddingAngle={5}
-                                dataKey="value"
-                              >
-                                {[0, 1, 2].map((entry, index) => (
-                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                ))}
-                              </Pie>
-                              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1f2937' }} />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        </div>
-                        <div className="flex justify-center gap-4 text-[10px] font-mono mt-2 uppercase text-slate-400">
-                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#6366f1]" /> Admin</span>
-                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" /> Faculty</span>
-                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" /> Student</span>
-                        </div>
-                      </div>
-
-                    </div>
-                  ) : null}
-
-                  {/* Standard 7-Day Space Allocation Rates */}
-                  <OccupancyChart sessionReceipts={sessionReceipts} />
                 </div>
               )}
 
@@ -3209,493 +2157,20 @@ export default function App() {
                   TAB: ADMIN OFFICE MASTER CONTROL CENTER
                   ========================================== */}
               {activeTab === 'admin' && user.role === 'admin' && (
-                <div className="space-y-8">
-                  <div className="p-4.5 bg-slate-900 rounded-2xl border border-red-950/40 text-left">
-                    <h2 className="text-lg font-bold tracking-tight text-rose-300">Administrative Oversight</h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Verify registered academic accounts, modify structural permissions, manage rooms metadata, or force-delete booked slots.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* Add Room form panel */}
-                    <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-850">
-                        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                          {adminRoomTab === 'single' ? (
-                            <>
-                              <Plus className="w-5 h-5 text-indigo-400" />
-                              De novo Room Creation
-                            </>
-                          ) : (
-                            <>
-                              <Upload className="w-5 h-5 text-indigo-400" />
-                              Bulk Room CSV Import
-                            </>
-                          )}
-                        </h3>
-                        <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => setAdminRoomTab('single')}
-                            className={`px-2 py-1 rounded text-[10px] font-mono font-bold transition-all ${
-                              adminRoomTab === 'single'
-                                ? 'bg-indigo-600 text-white'
-                                : 'text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            Single
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setAdminRoomTab('bulk')}
-                            className={`px-2 py-1 rounded text-[10px] font-mono font-bold transition-all ${
-                              adminRoomTab === 'bulk'
-                                ? 'bg-indigo-600 text-white'
-                                : 'text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            Bulk (CSV)
-                          </button>
-                        </div>
-                      </div>
-
-                      {adminRoomTab === 'single' ? (
-                        <form onSubmit={handleAdminAddRoom} className="space-y-4 text-left">
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Space Display Name*</label>
-                            <input
-                              type="text"
-                              required
-                              placeholder="e.g. Satish Dhawan Lecture Suite"
-                              value={adminRoomName}
-                              onChange={(e) => setAdminRoomName(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Seating capacity*</label>
-                              <input
-                                type="number"
-                                required
-                                value={adminRoomCapacity}
-                                onChange={(e) => setAdminRoomCapacity(Number(e.target.value))}
-                                className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Visual Gradient color</label>
-                              <select
-                                value={adminRoomColor}
-                                onChange={(e) => setAdminRoomColor(e.target.value)}
-                                className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none"
-                              >
-                                <option value="from-slate-705 to-slate-900">Charcoal Slate</option>
-                                <option value="from-violet-600 to-indigo-805">Violet Indigo</option>
-                                <option value="from-amber-600 to-orange-805">Amber Boardroom</option>
-                                <option value="from-teal-600 to-emerald-805">Teal Lecture</option>
-                              </select>
-                            </div>
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Features / Equipment list (Comma split)</label>
-                            <input
-                              type="text"
-                              placeholder="e.g. Acoustic soundproofing, Laser Projector, Smart Cooler"
-                              value={adminRoomFeatures}
-                              onChange={(e) => setAdminRoomFeatures(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Photo URL placeholder</label>
-                            <input
-                              type="text"
-                              placeholder="e.g. Unsplash photo URL"
-                              value={adminRoomImage}
-                              onChange={(e) => setAdminRoomImage(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
-                            />
-                          </div>
-                          <button
-                            type="submit"
-                            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-3 rounded-xl text-xs uppercase"
-                          >
-                            De novo Create Room
-                          </button>
-                        </form>
-                      ) : (
-                        <div className="space-y-4 text-left font-sans">
-                          <div className="p-3 bg-indigo-950/20 text-indigo-300 rounded-xl border border-indigo-900/35 text-xs flex flex-col gap-1.5">
-                            <span className="font-semibold text-indigo-200">CSV Column Formatting Guide:</span>
-                            <span className="font-mono text-[10px] bg-slate-950 p-1.5 rounded border border-slate-900 overflow-x-auto select-all block">
-                              name,capacity,features,image,color
-                            </span>
-                            <div className="flex items-center justify-between mt-1 pt-1.5 border-t border-indigo-900/20">
-                              <span className="text-[10px] text-slate-400">Features separation: Semicolon (;) or Comma (,)</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const demoText = `name,capacity,features,image,color\n"Homi Bhabha Lecture Lounge",55,"Laser Projector;Acoustic Soundproofing;Wi-Fi",https://images.unsplash.com/photo-1517502884422-41eaaced0168?w=800,from-violet-600 to-indigo-805\n"Vikram Sarabhai Lab Space",24,"High-Speed Fiber Ethernet;Smart Cooling",,from-teal-600 to-emerald-805\n"Harish-Chandra Seminar Studio",40,"Dual Glass Whiteboards;Ergonomic Seating",,from-amber-600 to-orange-805`;
-                                  setCsvText(demoText);
-                                  handleParseCsv(demoText);
-                                  addToast('Sample academic room spaces pre-filled!', 'success');
-                                }}
-                                className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 underline font-mono flex items-center gap-0.5 cursor-pointer"
-                              >
-                                ⚡ Load Live Demo CSV
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Interactive Dropzone block */}
-                          <div
-                            onDragEnter={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setDragActive(true);
-                            }}
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setDragActive(true);
-                            }}
-                            onDragLeave={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setDragActive(false);
-                            }}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setDragActive(false);
-                              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                                const file = e.dataTransfer.files[0];
-                                const reader = new FileReader();
-                                reader.onload = (event) => {
-                                  const text = event.target?.result as string;
-                                  setCsvText(text);
-                                  handleParseCsv(text);
-                                };
-                                reader.readAsText(file);
-                              }
-                            }}
-                            className={`p-5 rounded-xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-2 cursor-pointer relative ${
-                              dragActive 
-                                ? 'border-indigo-500 bg-indigo-500/5' 
-                                : 'border-slate-800 bg-slate-950 hover:border-slate-750'
-                            }`}
-                          >
-                            <input
-                              type="file"
-                              id="csv-file-upload-input"
-                              accept=".csv,text/csv"
-                              onChange={(e) => {
-                                if (e.target.files && e.target.files[0]) {
-                                  const file = e.target.files[0];
-                                  const reader = new FileReader();
-                                  reader.onload = (event) => {
-                                    const text = event.target?.result as string;
-                                    setCsvText(text);
-                                    handleParseCsv(text);
-                                  };
-                                  reader.readAsText(file);
-                                }
-                              }}
-                              className="absolute inset-0 opacity-0 cursor-pointer"
-                            />
-                            <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-slate-400">
-                              <FileSpreadsheet className="w-5 h-5 text-indigo-400" />
-                            </div>
-                            <div className="text-center">
-                              <p className="text-xs font-semibold text-slate-300">Drag & Drop room .csv file here</p>
-                              <p className="text-[10px] text-slate-500 mt-0.5">or click inside local explorer to select</p>
-                            </div>
-                          </div>
-
-                          {/* Paste Textarea alternative */}
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1">
-                              Or Paste raw CSV rows:
-                            </label>
-                            <textarea
-                              rows={4}
-                              value={csvText}
-                              onChange={(e) => {
-                                setCsvText(e.target.value);
-                                handleParseCsv(e.target.value);
-                              }}
-                              placeholder='e.g. "Space A",40,"Whiteboard, Projector"\n"Space B",15,"Wi-Fi"'
-                              className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500 font-mono"
-                            />
-                          </div>
-
-                          {/* Real-time parsing Errors feedback */}
-                          {csvErrors.length > 0 && (
-                            <div className="p-3 bg-amber-950/20 border border-amber-900/30 text-amber-500 rounded-xl text-xs space-y-1">
-                              <strong className="font-semibold block text-amber-400">CSV Parsing validation warnings:</strong>
-                              <ul className="list-disc pl-4 space-y-0.5 text-[11px] max-h-[100px] overflow-y-auto">
-                                {csvErrors.map((err, i) => (
-                                  <li key={i}>{err}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {/* Real-time parsed items Preview */}
-                          {parsedRooms.length > 0 && (
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
-                                  Parsed Inventory Preview ({parsedRooms.length} room spaces)
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setCsvText('');
-                                    setParsedRooms([]);
-                                    setCsvErrors([]);
-                                  }}
-                                  className="text-[10px] font-semibold text-rose-400 hover:text-rose-350 font-mono transition-colors"
-                                >
-                                  Clear Preview
-                                </button>
-                              </div>
-
-                              <div className="space-y-2 max-h-[140px] overflow-y-auto pr-1">
-                                {parsedRooms.map((room, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="p-2.5 bg-slate-950 border border-slate-850 rounded-lg flex items-center justify-between text-xs transition-all hover:border-slate-800"
-                                  >
-                                    <div className="text-left space-y-1">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`w-24 h-1.5 rounded-full bg-gradient-to-tr ${room.color}`} style={{ width: '12px', height: '12px' }} />
-                                        <strong className="text-slate-200">{room.name}</strong>
-                                      </div>
-                                      <div className="flex flex-wrap gap-1">
-                                        {room.features.slice(0, 3).map((feat: string, fidx: number) => (
-                                          <span key={fidx} className="px-1.5 py-0.5 bg-slate-900 border border-slate-850 rounded text-[9px] text-slate-400">
-                                            {feat}
-                                          </span>
-                                        ))}
-                                        {room.features.length > 3 && (
-                                          <span className="text-[9px] text-slate-500 self-center">
-                                            +{room.features.length - 3} more
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <span className="px-2 py-0.5 bg-indigo-950 border border-indigo-900/40 text-indigo-300 rounded text-[10px] font-mono font-bold shrink-0">
-                                      Cap: {room.capacity}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={handleAdminBulkImportRooms}
-                                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-3 rounded-xl text-xs uppercase flex items-center justify-center gap-1.5 transition-colors mt-2 cursor-pointer"
-                              >
-                                <Upload className="w-4 h-4" />
-                                Import {parsedRooms.length} Spaces into Database
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Manage user roles and credentials panel */}
-                    <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between">
-                      <div className="space-y-4">
-                        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-slate-850">
-                          <Users className="w-5 h-5 text-indigo-400" />
-                          Academic Credentials Directory ({adminUsers.length})
-                        </h3>
-                        <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                          {adminUsers.map((item) => (
-                            <div
-                              key={item.id}
-                              className="p-3 bg-slate-950 rounded-xl border border-slate-855 flex items-center justify-between text-xs"
-                            >
-                              <div className="text-left space-y-0.5">
-                                <strong className="text-slate-200 block">{item.name}</strong>
-                                <span className="text-[10px] text-slate-500 block font-mono">{item.email}</span>
-                              </div>
-                              <select
-                                value={item.role}
-                                onChange={(e) => handleAdminUpdateUserRole(item.id, e.target.value)}
-                                className={`bg-slate-900 border rounded py-1 px-1.5 text-[10px] font-bold uppercase ${
-                                  item.role === 'admin' ? 'border-red-900 text-red-400' :
-                                  item.role === 'faculty' ? 'border-teal-900 text-teal-400' :
-                                  'border-amber-900 text-amber-400'
-                                }`}
-                              >
-                                <option value="student">Student</option>
-                                <option value="faculty">Faculty</option>
-                                <option value="admin">Admin</option>
-                              </select>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Active Bookings Master Sweep */}
-                  <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl">
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5 pb-3 border-b border-slate-850 mb-4 text-left">
-                      <Trash2 className="w-5 h-5 text-rose-500" />
-                      Active Reservation Clearing master sweep ({adminBookings.length})
-                    </h3>
-                    {adminBookings.length === 0 ? (
-                      <p className="text-slate-500 italic text-xs py-4 text-center">No bookings exist in central schemas.</p>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto">
-                        {adminBookings.map((b) => (
-                          <div
-                            key={b.id}
-                            className="p-4 bg-slate-950 border border-slate-850 rounded-xl flex items-start justify-between text-xs gap-3 text-left"
-                          >
-                            <div className="space-y-1">
-                              <span className="font-extrabold text-indigo-300 block">Location: {b.room_name}</span>
-                              <span className="font-semibold text-slate-200 block">Title: {b.summary}</span>
-                              <span className="text-[10px] text-slate-400 block font-mono">
-                                Date: {new Date(b.start_time).toLocaleDateString()} | {new Date(b.start_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - {new Date(b.end_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
-                              </span>
-                              <span className="text-[9px] text-slate-500 block font-mono">Reserved by: {b.creator_name} ({b.creator_email})</span>
-                            </div>
-                            <button
-                              onClick={() => {
-                                setConfirmModal({
-                                  isOpen: true,
-                                  title: 'Decommission Booking Request',
-                                  message: `Are you sure you want to permanently delete the booking "${b.summary}" for room "${b.room_name}"?\n\nThis academic slot will become instantly vacant for other student schedules.`,
-                                  confirmText: 'Drop Booking',
-                                  cancelText: 'Keep Booking',
-                                  isDanger: true,
-                                  requiredTextToConfirm: 'DECOMMISSION',
-                                  onConfirm: async () => {
-                                    try {
-                                      await bookingsAPI.delete(b.id);
-                                      addToast('Booking dismissed.', 'success');
-                                      fetchDashboardModels(user.role);
-                                    } catch (err: any) {
-                                      addToast(err.message, 'error');
-                                    }
-                                  }
-                                });
-                              }}
-                              className="text-slate-400 hover:text-rose-400 p-2 hover:bg-slate-900 rounded-full transition-all shrink-0 cursor-pointer"
-                              title="Force Clear reservation slot"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Active Space Decommission list */}
-                  <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl">
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider pb-3 border-b border-slate-850 mb-4 text-left">
-                      Decommission Custom Spaces
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {rooms.map((item) => (
-                        <div
-                          key={item.id}
-                          className="p-3 bg-slate-950 border border-slate-855 rounded-xl flex items-center justify-between text-xs gap-3"
-                        >
-                          <div className="text-left">
-                            <strong className="text-slate-200 block">{item.name}</strong>
-                            <span className="text-[10px] text-slate-500 block">Capacity: {item.capacity} seats</span>
-                          </div>
-                          <button
-                            onClick={() => handleAdminDeleteRoom(item.id, item.name)}
-                            className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 py-1.5 px-3 border border-rose-900/40 rounded-lg shrink-0 font-bold font-mono text-[10px]"
-                          >
-                            Purge Room
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                </div>
+                <AdminPanel
+                  rooms={rooms}
+                  adminBookings={adminBookings}
+                  adminUsers={adminUsers}
+                  user={user}
+                  addToast={addToast}
+                  onRefreshData={() => fetchDashboardModels(user.role)}
+                  setConfirmModal={setConfirmModal}
+                  auditLogs={auditLogs}
+                  setAuditLogs={setAuditLogs}
+                />
               )}
 
-              {/* ==========================================
-                  OTHER TABS: DECORATED INTEGRATED SYSTEM PANELS
-                  ========================================== */}
-              {activeTab === 'drive' && (
-                !googleWorkspaceLinked ? (
-                  <WorkspaceGate
-                    activeTab="drive"
-                    isIframe={isIframe}
-                    onLink={linkGoogleWorkspaceAccount}
-                    onBypass={bypassGoogleWorkspaceAuthSimulated}
-                    isLinking={isLinkingGoogle}
-                  />
-                ) : (
-                  <DriveWidget receiptLogs={sessionReceipts} addToast={addToast} />
-                )
-              )}
 
-              {activeTab === 'gmail' && (
-                !googleWorkspaceLinked ? (
-                  <WorkspaceGate
-                    activeTab="gmail"
-                    isIframe={isIframe}
-                    onLink={linkGoogleWorkspaceAccount}
-                    onBypass={bypassGoogleWorkspaceAuthSimulated}
-                    isLinking={isLinkingGoogle}
-                  />
-                ) : (
-                  <GmailWidget 
-                    userEmail={user.email} 
-                    gmailLog={gmailLog}
-                    setGmailLog={setGmailLog}
-                    addToast={addToast}
-                  />
-                )
-              )}
-
-              {activeTab === 'chat' && (
-                !googleWorkspaceLinked ? (
-                  <WorkspaceGate
-                    activeTab="chat"
-                    isIframe={isIframe}
-                    onLink={linkGoogleWorkspaceAccount}
-                    onBypass={bypassGoogleWorkspaceAuthSimulated}
-                    isLinking={isLinkingGoogle}
-                  />
-                ) : (
-                  <ChatWidget 
-                    chatLog={chatLog}
-                    setChatLog={setChatLog}
-                    addToast={addToast}
-                  />
-                )
-              )}
-
-              {activeTab === 'forms' && (
-                !googleWorkspaceLinked ? (
-                  <WorkspaceGate
-                    activeTab="forms"
-                    isIframe={isIframe}
-                    onLink={linkGoogleWorkspaceAccount}
-                    onBypass={bypassGoogleWorkspaceAuthSimulated}
-                    isLinking={isLinkingGoogle}
-                  />
-                ) : (
-                  <FormsWidget />
-                )
-              )}
 
             </motion.div>
             </div>
@@ -3804,6 +2279,14 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* MODAL: Full Real-time QR Code Scanner */}
+      <QRScannerModal
+        isOpen={isQRScannerOpen}
+        onClose={() => setIsQRScannerOpen(false)}
+        rooms={rooms}
+        onCheckInSuccess={triggerFastCheckIn}
+      />
+
       {/* CONFIRMATION SLOT SELECTION DIALOG */}
       <AnimatePresence>
         {confirmRoomSelection && (
@@ -3846,503 +2329,43 @@ export default function App() {
       </AnimatePresence>
 
       {/* DYNAMIC ACTIVITY HISTORY DRAWER */}
-      <AnimatePresence>
-        {selectedRoomForHistory && (
-          <>
-            {/* Dark blur backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => {
-                setSelectedRoomForHistory(null);
-                setHistorySearchQuery('');
-              }}
-              className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 cursor-pointer"
-            />
-
-            {/* Slide-out drawer panel */}
-            <motion.div
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-              className="fixed right-0 top-0 bottom-0 w-full sm:max-w-md bg-slate-900 border-l border-slate-800 shadow-2xl z-50 flex flex-col h-full text-slate-200 overflow-hidden"
-            >
-              {/* Header section with background pattern */}
-              <div className="relative p-6 border-b border-slate-800/80 shrink-0 bg-slate-950/40">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
-                
-                <div className="flex items-start justify-between gap-4 relative z-10">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-indigo-950/80 text-indigo-400 border border-indigo-900/30 rounded-2xl">
-                      <History className="w-5 h-5" />
-                    </div>
-                    <div className="space-y-0.5 text-left">
-                      <span className="text-[10px] font-mono tracking-wider text-slate-500 uppercase font-extrabold">Room Insights</span>
-                      <h3 className="text-md font-black text-white">{selectedRoomForHistory.name}</h3>
-                      <p className="text-[11px] text-slate-400">
-                        Detailed resource reservation activity archives.
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <button
-                    onClick={() => {
-                      setSelectedRoomForHistory(null);
-                      setHistorySearchQuery('');
-                    }}
-                    className="p-1.5 hover:bg-slate-850 text-slate-500 hover:text-white rounded-xl transition cursor-pointer border border-transparent hover:border-slate-800"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Live stats insights grid */}
-              {(() => {
-                const roomBookings = adminBookings.filter(b => 
-                  b.room_name?.toLowerCase().includes(selectedRoomForHistory.name.toLowerCase()) || 
-                  selectedRoomForHistory.name?.toLowerCase().includes(b.room_name?.toLowerCase())
-                );
-
-                const sortedBookings = [...roomBookings].sort(
-                  (a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
-                );
-
-                const filteredBookings = sortedBookings.filter(b => {
-                  if (!historySearchQuery.trim()) return true;
-                  const query = historySearchQuery.toLowerCase();
-                  return (
-                    b.summary?.toLowerCase().includes(query) ||
-                    b.creator_name?.toLowerCase().includes(query) ||
-                    b.creator_email?.toLowerCase().includes(query)
-                  );
-                });
-
-                const now = new Date();
-
-                return (
-                  <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-                    {/* Bento Stat Badges */}
-                    <div className="p-6 grid grid-cols-2 gap-4 shrink-0 bg-slate-950/20 border-b border-slate-850/40">
-                      <div className="p-4 bg-slate-950/60 border border-slate-850 rounded-2xl text-left space-y-1">
-                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest font-mono">Total Reservations</span>
-                        <div className="flex items-baseline gap-1.5">
-                          <span className="text-2xl font-black text-white">{sortedBookings.length}</span>
-                          <span className="text-[10px] text-indigo-400 font-bold">logs</span>
-                        </div>
-                      </div>
-
-                      <div className="p-4 bg-slate-950/60 border border-slate-850 rounded-2xl text-left space-y-1">
-                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest font-mono">Current Status</span>
-                        <div className="flex items-center gap-2 pt-1">
-                          <span className={`w-2 h-2 rounded-full ${selectedRoomForHistory.status === 'available' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-450 animate-pulse'}`} />
-                          <span className={`text-xs font-black uppercase font-mono ${selectedRoomForHistory.status === 'available' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {selectedRoomForHistory.status === 'available' ? 'AVAILABLE' : 'OCCUPIED'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Search bar inside the drawer */}
-                    <div className="px-6 pt-4 pb-2 shrink-0">
-                      <div className="relative">
-                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
-                        <input
-                          id="history-drawer-search-input"
-                          type="text"
-                          value={historySearchQuery}
-                          onChange={(e) => setHistorySearchQuery(e.target.value)}
-                          placeholder="Filter bookings by user, email, or summary..."
-                          className="w-full bg-slate-950 hover:bg-slate-950/90 focus:bg-slate-950 border border-slate-800 focus:border-indigo-500/80 rounded-xl pl-9.5 pr-8.5 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-all font-sans shadow-inner text-left"
-                        />
-                        {historySearchQuery && (
-                          <button
-                            id="clear-history-search-btn"
-                            onClick={() => setHistorySearchQuery('')}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-all cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Timeline logs */}
-                    <div className="p-6 flex-1 min-h-0 flex flex-col text-left">
-                      <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-mono mb-4 flex items-center gap-1.5">
-                        <Activity className="w-3.5 h-3.5 text-indigo-400" />
-                        Historical Action Feed
-                      </h4>
-
-                      {sortedBookings.length === 0 ? (
-                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
-                          <div className="w-12 h-12 rounded-2xl bg-slate-950 flex items-center justify-center border border-slate-850">
-                            <Clock className="w-6 h-6 text-slate-600" />
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-400">No activity logged matching space</p>
-                            <p className="text-[11px] text-slate-600 mt-1 max-w-xs leading-relaxed">
-                              This student hub doesn't present historic timeline logs currently. It's fully ready for instant synchronization.
-                            </p>
-                          </div>
-                        </div>
-                      ) : filteredBookings.length === 0 ? (
-                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
-                          <div className="w-12 h-12 rounded-2xl bg-slate-950 flex items-center justify-center border border-slate-850">
-                            <Search className="w-6 h-6 text-indigo-400/80 animate-pulse" />
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-300">No matching reservations found</p>
-                            <p className="text-[11px] text-slate-500 mt-1 max-w-xs leading-relaxed">
-                              Your search query <span className="text-indigo-400 font-mono">"{historySearchQuery}"</span> didn't match any reservation details.
-                            </p>
-                            <button
-                              onClick={() => setHistorySearchQuery('')}
-                              className="mt-4 px-3 py-1.5 bg-indigo-950/65 hover:bg-indigo-900/65 border border-indigo-900/40 text-indigo-300 rounded-lg text-[10.5px] font-bold uppercase transition-all tracking-wide cursor-pointer"
-                            >
-                              Clear Search Filter
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-6 overflow-y-auto pr-1 flex-1 pl-4 relative">
-                          {/* Left thin connecting guide line for timeline */}
-                          <div className="absolute left-1.5 top-2 bottom-2 w-0.5 bg-slate-800" />
-
-                          {filteredBookings.map((b) => {
-                            const startTime = new Date(b.start_time);
-                            const endTime = new Date(b.end_time);
-                            const isUpcoming = startTime >= now;
-                            const isActiveNow = startTime <= now && endTime >= now;
-
-                            return (
-                              <div key={b.id} className="relative text-left">
-                                {/* Bullet indicator absolute pin */}
-                                <div className="absolute -left-[20px] top-1.5 w-3 h-3 rounded-full bg-slate-900 border-2 border-slate-750 flex items-center justify-center z-10">
-                                  <div className={`w-1 h-1 rounded-full ${
-                                    isActiveNow ? 'bg-emerald-450 animate-ping' :
-                                    isUpcoming ? 'bg-indigo-400' : 'bg-slate-500'
-                                  }`} />
-                                </div>
-
-                                <div className="bg-slate-950/60 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-4 rounded-2xl space-y-2 transition-all shadow-md">
-                                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                                    <span className="font-extrabold text-xs text-white tracking-wide max-w-[180px] truncate" title={b.summary}>
-                                      {b.summary}
-                                    </span>
-                                    <span className={`text-[8px] font-black uppercase tracking-wider font-mono px-2 py-0.5 rounded border ${
-                                      isActiveNow ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/40' :
-                                      isUpcoming ? 'bg-indigo-950/80 text-indigo-300 border-indigo-800/40' :
-                                      'bg-slate-900/60 text-slate-400 border-slate-800/60'
-                                    }`}>
-                                      {isActiveNow ? 'ACTIVE NOW' : isUpcoming ? 'UPCOMING' : 'COMPLETED'}
-                                    </span>
-                                  </div>
-
-                                  <div className="space-y-1 font-mono text-[10px]">
-                                    <div className="flex items-center gap-1.5 text-slate-400">
-                                      <Clock className="w-3 h-3 text-indigo-400 shrink-0" />
-                                      <span>
-                                        {startTime.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
-                                        {' • '} 
-                                        {startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                      </span>
-                                    </div>
-
-                                    <div className="flex items-center gap-1.5 text-slate-500 pt-0.5">
-                                      <UserCheck className="w-3 h-3 text-indigo-500 shrink-0" />
-                                      <span className="truncate max-w-[220px]" title={`${b.creator_name} (${b.creator_email})`}>
-                                        {b.creator_name || 'Anonymous User'} ({b.creator_email})
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  <div className="pt-2 border-t border-slate-900/60 flex justify-end">
-                                    <button
-                                      onClick={() => handleAddToGoogleCalendar(b)}
-                                      disabled={syncingBookingId === b.id}
-                                      className="py-1 px-3 bg-indigo-650/40 hover:bg-indigo-600/70 text-slate-200 text-[10px] font-extrabold uppercase tracking-wider rounded-lg border border-indigo-500/25 flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
-                                    >
-                                      {syncingBookingId === b.id ? (
-                                        <>
-                                          <Loader2 className="w-3 h-3 animate-spin text-indigo-300" />
-                                          <span>Syncing...</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <CalendarPlus className="w-3 h-3 text-indigo-400" />
-                                          <span>Add to Google Calendar</span>
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Drawer footer summary */}
-              <div className="p-6 bg-slate-950/50 border-t border-slate-800/80 shrink-0 text-center">
-                <button
-                  onClick={() => {
-                    setSelectedRoomForHistory(null);
-                    setHistorySearchQuery('');
-                  }}
-                  className="w-full bg-slate-850 hover:bg-slate-800 border border-slate-700/60 text-slate-300 font-bold py-2.5 px-4 rounded-xl text-xs uppercase cursor-pointer transition-all"
-                >
-                  Close Insights Drawer
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <ActivityHistoryDrawer
+        selectedRoomForHistory={selectedRoomForHistory}
+        onClose={() => {
+          setSelectedRoomForHistory(null);
+          setHistorySearchQuery('');
+          setHistoryPeriodFilter('all');
+          setHistoryStartDate('');
+          setHistoryEndDate('');
+        }}
+        adminBookings={adminBookings}
+        historySearchQuery={historySearchQuery}
+        setHistorySearchQuery={setHistorySearchQuery}
+        historyPeriodFilter={historyPeriodFilter}
+        setHistoryPeriodFilter={setHistoryPeriodFilter}
+        historyStartDate={historyStartDate}
+        setHistoryStartDate={setHistoryStartDate}
+        historyEndDate={historyEndDate}
+        setHistoryEndDate={setHistoryEndDate}
+      />
 
       {/* PREMIUM DETAILED ROOM INFO DRAWER */}
-      <AnimatePresence>
-        {selectedRoomForDetails && (
-          <>
-            {/* Dark blur backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedRoomForDetails(null)}
-              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 cursor-pointer"
-            />
-
-            {/* Slide-out drawer panel */}
-            <motion.div
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-              className={`fixed right-0 top-0 bottom-0 w-full sm:max-w-md border-l shadow-2xl z-50 flex flex-col h-full overflow-hidden text-left ${
-                isDarkMode 
-                  ? 'bg-slate-900 border-slate-800 text-slate-100' 
-                  : 'bg-white border-[#ead29c]/50 text-[#0a4735]'
-              }`}
-            >
-              {/* Cover Image Header */}
-              <div className="relative h-56 shrink-0 bg-stone-100">
-                <img 
-                  src={selectedRoomForDetails.image} 
-                  alt={selectedRoomForDetails.name} 
-                  className="w-full h-full object-cover" 
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#0a4735] via-[#0a4735]/40 to-transparent" />
-                
-                {/* Close Button overlay */}
-                <button
-                  onClick={() => setSelectedRoomForDetails(null)}
-                  className="absolute top-4 right-4 p-2 bg-black/55 hover:bg-black/75 text-white rounded-full transition-all cursor-pointer backdrop-blur-sm flex items-center justify-center"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-
-                <div className="absolute bottom-4 left-6 right-6 text-left">
-                  {selectedRoomForDetails.category && (
-                    <span className="bg-[#dfb965] text-[#0a4735] text-[9px] font-extrabold uppercase py-0.5 px-2 rounded-lg border border-[#ead29c]/50 mb-1.5 inline-block tracking-wider font-mono">
-                      {selectedRoomForDetails.category}
-                    </span>
-                  )}
-                  <h3 className="text-2xl font-display font-extrabold text-white drop-shadow-md leading-tight">
-                    {selectedRoomForDetails.name}
-                  </h3>
-                </div>
-              </div>
-
-              {/* Scrollable details */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                {/* Live Status indicator banner */}
-                <div className={`p-4 rounded-2xl border flex items-center justify-between shadow-sm ${
-                  selectedRoomForDetails.status === 'available' 
-                    ? (isDarkMode ? 'bg-emerald-950/40 border-emerald-900/30 text-emerald-400' : 'bg-emerald-50/70 border-emerald-200/60 text-emerald-800')
-                    : (isDarkMode ? 'bg-rose-950/40 border-rose-900/30 text-rose-450' : 'bg-rose-50/70 border-rose-200/60 text-rose-800')
-                }`}>
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${
-                      selectedRoomForDetails.status === 'available' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
-                    }`} />
-                    <span className="text-xs font-mono font-extrabold uppercase tracking-wider">
-                      {selectedRoomForDetails.status === 'available' ? 'SPACE IS VACANT' : 'SPACE IS RESERVED'}
-                    </span>
-                  </div>
-                  <span className={`text-[10px] font-mono font-bold ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>Real-time status</span>
-                </div>
-
-                {/* Core Specifications */}
-                <div className={`border rounded-2xl p-4.5 space-y-3.5 ${
-                  isDarkMode 
-                    ? 'bg-slate-950/60 border-slate-800/80' 
-                    : 'bg-[#faf8f2] border-[#ead29c]/30'
-                }`}>
-                  <h4 className="text-[10px] font-extrabold text-[#c09728] uppercase tracking-widest font-mono">
-                    Core Specifications
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1 text-left">
-                      <span className="text-[10.5px] text-slate-400 block font-semibold uppercase tracking-wider">Seating Capacity</span>
-                      <div className={`flex items-center gap-1.5 font-bold text-sm ${isDarkMode ? 'text-slate-200' : 'text-slate-850'}`}>
-                        <Users className={`w-4 h-4 ${isDarkMode ? 'text-[#dfb965]' : 'text-[#0a4735]'}`} />
-                        <span>{selectedRoomForDetails.capacity} Seats</span>
-                      </div>
-                    </div>
-                    <div className="space-y-1 text-left">
-                      <span className="text-[10.5px] text-slate-400 block font-semibold uppercase tracking-wider">Campus Venue</span>
-                      <div className={`flex items-center gap-1.5 font-bold text-sm ${isDarkMode ? 'text-slate-200' : 'text-slate-850'}`}>
-                        <Building2 className={`w-4 h-4 ${isDarkMode ? 'text-[#dfb965]' : 'text-[#0a4735]'}`} />
-                        <span className="truncate">{selectedRoomForDetails.building || 'IIT (BHU)'}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* suitables for description */}
-                {selectedRoomForDetails.bestFor && (
-                  <div className="space-y-2 text-left">
-                    <h4 className="text-[10px] font-extrabold text-[#c09728] uppercase tracking-widest font-mono">
-                      Academic Suitability
-                    </h4>
-                    <p className={`${isDarkMode ? 'text-slate-300' : 'text-slate-500'} text-xs leading-relaxed font-serif font-light`}>
-                      {selectedRoomForDetails.bestFor}
-                    </p>
-                  </div>
-                )}
-
-                {/* Features & Amenities */}
-                <div className="space-y-3 text-left">
-                  <h4 className="text-[10px] font-extrabold text-[#c09728] uppercase tracking-widest font-mono">
-                    Available Technology & Amenities
-                  </h4>
-                  <div className="grid grid-cols-1 gap-2.5">
-                    {selectedRoomForDetails.features.map((feature, idx) => {
-                      // Dynamic Icon Matching
-                      const text = feature.toLowerCase();
-                      let icon = <Compass className="w-4 h-4" />;
-                      let featureDesc = "Fully integrated & certified for academic applications.";
-                      
-                      if (text.includes('projector') || text.includes('display') || text.includes('screen')) {
-                        icon = <Tv className="w-4 h-4" />;
-                        featureDesc = "Ultra-high-definition presentation output.";
-                      } else if (text.includes('sound') || text.includes('audio') || text.includes('video') || text.includes('conferencing')) {
-                        icon = <Wifi className="w-4 h-4" />;
-                        featureDesc = "Optimized for hybrid lectures & remote participants.";
-                      } else if (text.includes('ac') || text.includes('air conditioning') || text.includes('wind')) {
-                        icon = <Wind className="w-4 h-4 text-sky-650" />;
-                        featureDesc = "Temperature-controlled climate feedback.";
-                      } else if (text.includes('whiteboard') || text.includes('glass')) {
-                        icon = <BookOpen className="w-4 h-4" />;
-                        featureDesc = "Writable surfaces for diagramming.";
-                      } else if (text.includes('ergonomic') || text.includes('seating') || text.includes('chairs')) {
-                        icon = <Accessibility className="w-4 h-4" />;
-                        featureDesc = "Comfortable seating for extended seminars.";
-                      }
-
-                      return (
-                        <div key={idx} className={`flex items-start gap-3 p-3 border rounded-xl ${
-                          isDarkMode 
-                            ? 'bg-slate-950/40 border-slate-800/40' 
-                            : 'bg-[#faf8f2]/40 border-[#ead29c]/20'
-                        }`}>
-                          <div className={`p-2 rounded-lg border shrink-0 shadow-sm ${
-                            isDarkMode 
-                              ? 'bg-slate-900 border-slate-800 text-[#dfb965]' 
-                              : 'bg-white border-[#ead29c]/45 text-[#0a4735]'
-                          }`}>
-                            {icon}
-                          </div>
-                          <div className="space-y-0.5 text-left">
-                            <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{feature}</span>
-                            <span className={`text-[10.5px] block leading-tight ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{featureDesc}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Booking contact and department */}
-                {selectedRoomForDetails.contactDepartment && (
-                  <div className={`p-4 border rounded-2xl text-left space-y-1 ${
-                    isDarkMode 
-                      ? 'bg-slate-950/60 border-slate-800/80' 
-                      : 'bg-stone-50 border-stone-200/65'
-                  }`}>
-                    <span className={`text-[9px] font-bold uppercase tracking-widest font-mono ${isDarkMode ? 'text-slate-400' : 'text-stone-500'}`}>
-                      Administrative Custodian
-                    </span>
-                    <div className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                      Primary contact: <strong className={`font-extrabold ${isDarkMode ? 'text-[#dfb965]' : 'text-[#0a4735]'}`}>{selectedRoomForDetails.contactDepartment}</strong>
-                    </div>
-                    <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                      Subject to booking criteria of the coordinating department.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Action footer */}
-              <div className={`p-6 border-t shrink-0 flex items-center gap-3 ${
-                isDarkMode 
-                  ? 'bg-slate-950 border-slate-850' 
-                  : 'bg-[#faf8f2]/60 border-[#ead29c]/30'
-              }`}>
-                <button
-                  onClick={() => setSelectedRoomForDetails(null)}
-                  className={`flex-1 py-3 border font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm text-center font-display ${
-                    isDarkMode 
-                      ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850' 
-                      : 'bg-white border-[#ead29c] text-[#0a4735] hover:bg-[#faf8f2]'
-                  }`}
-                >
-                  Close Details
-                </button>
-                {selectedRoomForDetails.status === 'available' ? (
-                  <button
-                    onClick={() => {
-                      setConfirmRoomSelection(selectedRoomForDetails);
-                      setPreselectedRoomId(selectedRoomForDetails.id);
-                      setSelectedRoomForDetails(null);
-                      setActiveTab('calendar');
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    className={`flex-1 py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md text-center font-display ${
-                      isDarkMode 
-                        ? 'bg-indigo-600 hover:bg-indigo-500 text-white' 
-                        : 'bg-[#0a4735] hover:bg-[#063325] text-white'
-                    }`}
-                  >
-                    Reserve Now
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setSelectedRoomForHistory(selectedRoomForDetails);
-                      setSelectedRoomForDetails(null);
-                    }}
-                    className={`flex-1 py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md text-center font-display ${
-                      isDarkMode 
-                        ? 'bg-[#dfb965] hover:bg-[#dfb965]/95 text-slate-950' 
-                        : 'bg-[#dfb965] hover:bg-[#d4af37] text-[#0a4735]'
-                    }`}
-                  >
-                    View Schedule
-                  </button>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <RoomDetailsDrawer
+        selectedRoomForDetails={selectedRoomForDetails}
+        onClose={() => setSelectedRoomForDetails(null)}
+        isDarkMode={isDarkMode}
+        onReserveClick={(room) => {
+          setConfirmRoomSelection(room);
+          setPreselectedRoomId(room.id);
+          setSelectedRoomForDetails(null);
+          setActiveTab('calendar');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onViewScheduleClick={(room) => {
+          setSelectedRoomForHistory(room);
+          setSelectedRoomForDetails(null);
+        }}
+      />
 
       {/* Footer Branding */}
       <footer className="py-6 border-t border-slate-900/80 mt-12 bg-slate-900/40">
@@ -4353,73 +2376,29 @@ export default function App() {
       </footer>
 
       {/* Resilient Custom Confirmation Modal (Bypasses sandboxed iframe window.confirm blocks completely) */}
-      <AnimatePresence>
-        {confirmModal && confirmModal.isOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
-              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 16 }}
-              className="bg-slate-900 border border-slate-800 p-6 rounded-3xl w-full max-w-md shadow-2xl relative z-10 space-y-5 text-left border-indigo-500/10"
-            >
-              <div className="space-y-2">
-                <h3 className="text-base font-bold text-white flex items-center gap-2 font-sans">
-                  <AlertTriangle className={`w-5 h-5 ${confirmModal.isDanger ? 'text-rose-500' : 'text-indigo-400'}`} />
-                  {confirmModal.title}
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-sans">
-                  {confirmModal.message}
-                </p>
-              </div>
-              {confirmModal.requiredTextToConfirm && (
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
-                    Accidental Deletion Safeguard: Type "{confirmModal.requiredTextToConfirm}" to confirm:
-                  </label>
-                  <input
-                    type="text"
-                    value={confirmInputText}
-                    onChange={(e) => setConfirmInputText(e.target.value)}
-                    placeholder={`Type ${confirmModal.requiredTextToConfirm}`}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500 font-sans"
-                  />
-                </div>
-              )}
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button
-                  onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
-                  className="px-4 py-2 bg-slate-950 hover:bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold hover:text-white text-slate-400 transition-all cursor-pointer select-none"
-                >
-                  {confirmModal.cancelText || 'Cancel'}
-                </button>
-                <button
-                  onClick={() => {
-                    setConfirmModal({ ...confirmModal, isOpen: false });
-                    confirmModal.onConfirm();
-                  }}
-                  disabled={confirmModal.requiredTextToConfirm ? confirmInputText !== confirmModal.requiredTextToConfirm : false}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer select-none text-white shadow-lg ${
-                    confirmModal.requiredTextToConfirm && confirmInputText !== confirmModal.requiredTextToConfirm
-                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-750'
-                      : confirmModal.isDanger 
-                      ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-900/10' 
-                      : 'bg-indigo-600 hover:bg-indigo-550 shadow-indigo-900/10'
-                  }`}
-                >
-                  {confirmModal.confirmText || 'Confirm'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <ConfirmModal
+        isOpen={!!confirmModal && confirmModal.isOpen}
+        title={confirmModal?.title || ''}
+        message={confirmModal?.message || ''}
+        onConfirm={() => {
+          if (confirmModal) {
+            setConfirmModal({ ...confirmModal, isOpen: false });
+            confirmModal.onConfirm();
+          }
+        }}
+        onCancel={() => {
+          if (confirmModal) {
+            setConfirmModal({ ...confirmModal, isOpen: false });
+            if (confirmModal.onCancel) confirmModal.onCancel();
+          }
+        }}
+        confirmText={confirmModal?.confirmText}
+        cancelText={confirmModal?.cancelText}
+        isDanger={confirmModal?.isDanger}
+        requiredTextToConfirm={confirmModal?.requiredTextToConfirm}
+        confirmInputText={confirmInputText}
+        setConfirmInputText={setConfirmInputText}
+      />
     </div>
   );
 }

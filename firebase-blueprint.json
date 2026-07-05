@@ -60,6 +60,10 @@
         "color": {
           "type": "string",
           "description": "Visual theme color scheme for the room card"
+        },
+        "buffer_time": {
+          "type": "integer",
+          "description": "Gap of at least X minutes required before and after any existing booking"
         }
       },
       "required": ["id", "name", "capacity", "features"]

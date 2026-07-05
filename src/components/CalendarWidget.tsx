@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CalendarAPI, DriveAPI } from '../lib/workspace';
 import { Room } from '../types';
 import { bookingsAPI } from '../lib/api';
+import { CalendarAPI } from '../lib/workspace';
+import { getAccessToken, googleSignIn, clearAccessToken, auth } from '../lib/auth';
 import {
   Calendar,
   Clock,
@@ -14,7 +15,9 @@ import {
   Users,
   Check,
   Shuffle,
-  ArrowRight
+  ArrowRight,
+  ExternalLink,
+  Edit2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -41,6 +44,29 @@ export default function CalendarWidget({
   const [showBookModal, setShowBookModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverConflict, setServerConflict] = useState<any>(null);
+  const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
+  const [googleUser, setGoogleUser] = useState<any>(null);
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const checkGoogleConn = async () => {
+      const token = await getAccessToken();
+      const firebaseUser = auth.currentUser;
+      if (token && firebaseUser) {
+        setIsGoogleConnected(true);
+        setGoogleUser(firebaseUser);
+      } else {
+        setIsGoogleConnected(false);
+        setGoogleUser(null);
+      }
+    };
+    checkGoogleConn();
+
+    const interval = setInterval(checkGoogleConn, 2000);
+    return () => clearInterval(interval);
+  }, []);
   const [conflictResolverData, setConflictResolverData] = useState<{
     requestedRoom: Room;
     requestedStartTime: string;
@@ -296,6 +322,30 @@ export default function CalendarWidget({
     }
   }, [startTime, endTime]);
 
+  const handleConnectGoogle = async () => {
+    try {
+      setIsConnectingGoogle(true);
+      const res = await googleSignIn();
+      if (res) {
+        setIsGoogleConnected(true);
+        setGoogleUser(res.user);
+        alert('Successfully connected your Google Account!');
+        fetchCalendarEvents();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to connect Google Account.');
+    } finally {
+      setIsConnectingGoogle(false);
+    }
+  };
+
+  const handleDisconnectGoogle = () => {
+    clearAccessToken();
+    setIsGoogleConnected(false);
+    setGoogleUser(null);
+    alert('Disconnected from Google Account.');
+  };
+
   const fetchCalendarEvents = async () => {
     setLoading(true);
     setError(null);
@@ -311,31 +361,15 @@ export default function CalendarWidget({
         creator: { email: b.creator_email, displayName: b.creator_name },
         start: { dateTime: b.start_time },
         end: { dateTime: b.end_time },
-        attendees: b.attendee_email ? [{ email: b.attendee_email }] : []
+        attendees: b.attendee_email ? [{ email: b.attendee_email }] : [],
+        google_event_id: b.google_event_id || null,
+        google_calendar_link: b.google_calendar_link || null,
+        google_sync_status: b.google_sync_status || 'not_connected',
+        google_sync_error: b.google_sync_error || null,
+        faculty_id: b.faculty_id || ''
       }));
 
-      // Check if Google Workspace token is active in user session cache
-      let gEvents: any[] = [];
-      const hasGoogleToken = !!sessionStorage.getItem('google_workspace_access_token');
-      if (hasGoogleToken) {
-        try {
-          gEvents = await CalendarAPI.listEvents();
-        } catch (gErr) {
-          console.warn('Google Workspace credentials dormant/invalid:', gErr);
-        }
-      }
-
-      // Combine events safely
-      const combined = [...mappedDbEvents];
-      gEvents.forEach((ge: any) => {
-        // Prevent duplicate titles on same hour
-        const overlap = combined.some(c => c.summary === ge.summary && c.location === ge.location);
-        if (!overlap) {
-          combined.push(ge);
-        }
-      });
-
-      setEvents(combined);
+      setEvents(mappedDbEvents);
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Could not fetch central space schedule.');
@@ -620,24 +654,6 @@ export default function CalendarWidget({
         bypassConflict: true
       });
 
-      const hasGoogleToken = !!sessionStorage.getItem('google_workspace_access_token');
-      if (hasGoogleToken) {
-        try {
-          await CalendarAPI.createEvent({
-            roomName: targetRoomName,
-            summary,
-            startTime: startDateTime,
-            endTime: endDateTime,
-            creatorName: userName,
-            creatorEmail: userEmail,
-            facultyId: facultyId || undefined,
-            attendeeEmail: attendeeEmail || undefined,
-          });
-        } catch (gErr) {
-          console.warn('Google Workspace sync skipped:', gErr);
-        }
-      }
-
       setConflictResolverData(null);
       setShowBookModal(false);
       setSummary('');
@@ -657,7 +673,7 @@ export default function CalendarWidget({
     e.preventDefault();
     if (!summary.trim()) return;
 
-    if (conflicts.length > 0 && !bypassConflict) {
+    if (conflicts.length > 0 && !bypassConflict && !isEditing) {
       triggerConflictResolver(conflicts);
       return;
     }
@@ -669,109 +685,101 @@ export default function CalendarWidget({
     const startDateTime = new Date(`${date}T${startTime}:00`).toISOString();
     const endDateTime = new Date(`${date}T${endTime}:00`).toISOString();
 
-    try {
-      await bookingsAPI.create({
-        roomId: selectedRoomId,
-        roomName,
-        summary,
-        agenda,
-        startTime: startDateTime,
-        endTime: endDateTime,
-        attendeeEmail: attendeeEmail || undefined,
-        facultyId: facultyId || undefined,
-        bypassConflict: bypassConflict
-      });
+    let googleEventId = null;
+    let googleCalendarLink = null;
+    let googleSyncStatus = 'not_connected';
+    let googleSyncError = null;
 
-      const hasGoogleToken = !!sessionStorage.getItem('google_workspace_access_token');
-      if (hasGoogleToken) {
-        try {
-          await CalendarAPI.createEvent({
+    if (isEditing && editingBookingId) {
+      // Find existing event to keep any existing sync properties
+      const existing = events.find((ev) => ev.id === editingBookingId);
+      if (existing) {
+        googleEventId = existing.google_event_id || null;
+        googleCalendarLink = existing.google_calendar_link || null;
+        googleSyncStatus = existing.google_sync_status || 'not_connected';
+        googleSyncError = existing.google_sync_error || null;
+      }
+    }
+
+    if (isGoogleConnected) {
+      try {
+        if (isEditing && googleEventId) {
+          // Update existing Google Calendar event
+          const updatedEvent = await CalendarAPI.updateEvent(googleEventId, {
             roomName,
             summary,
             startTime: startDateTime,
             endTime: endDateTime,
-            creatorName: userName,
-            creatorEmail: userEmail,
-            facultyId: facultyId || undefined,
-            attendeeEmail: attendeeEmail || undefined,
+            agenda: agenda || '',
+            attendeeEmail: attendeeEmail || '',
+            creatorName: userName || 'Faculty User',
+            creatorEmail: userEmail || 'user@iitbhu.ac.in',
           });
-
-          const timestamp = Date.now();
-          const receiptFilename = `${roomName.replace(/\s+/g, '_')}_Booking_Receipt_${timestamp}.html`;
-          const receiptHtml = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta charset="utf-8">
-              <title>Smart Room Booking Receipt</title>
-              <style>
-                body { font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; }
-                .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; max-width: 500px; margin: 0 auto; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-                h2 { color: #818cf8; border-bottom: 2px solid #334155; padding-bottom: 12px; margin-top: 0; }
-                .item { font-size: 14px; margin: 12px 0; }
-                .label { color: #94a3b8; font-weight: bold; }
-              </style>
-            </head>
-            <body>
-              <div class="card">
-                <h2>Smart Room Booking Receipt</h2>
-                <div class="item"><span class="label">Room Space:</span> ${roomName}</div>
-                <div class="item"><span class="label">Meeting Title:</span> ${summary}</div>
-                <div class="item"><span class="label">Reservation Start:</span> ${new Date(startDateTime).toLocaleString()}</div>
-                <div class="item"><span class="label">Reservation End:</span> ${new Date(endDateTime).toLocaleString()}</div>
-                <div class="item"><span class="label">Faculty Member:</span> ${facultyId || userName}</div>
-                <div class="item"><span class="label">Attendee Email:</span> ${attendeeEmail || 'None'}</div>
-                <div style="font-size: 10px; color: #64748b; margin-top: 30px; text-align: center;">Verified by IIT BHU Smart Room Scheduler Dashboard</div>
-              </div>
-            </body>
-            </html>
-          `;
-          await DriveAPI.createLogFile(receiptFilename, receiptHtml);
-
-          const agendaFilename = `${summary.replace(/\s+/g, '_')}_Meeting_Agenda_${timestamp}.html`;
-          const agendaHtml = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta charset="utf-8">
-              <title>Meeting Agenda: ${summary}</title>
-              <style>
-                body { font-family: sans-serif; background: #0b0f19; color: #e2e8f0; padding: 40px; line-height: 1.6; }
-                .container { background: #111827; border: 1px solid #1f2937; border-radius: 16px; padding: 32px; max-width: 650px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); }
-                h1 { color: #6366f1; border-bottom: 2px solid #1f2937; padding-bottom: 12px; font-size: 24px; margin-top: 0; }
-                h2 { color: #10b981; font-size: 18px; margin-top: 24px; }
-                .meta-box { background: #1f2937; padding: 16px; border-radius: 8px; margin-bottom: 24px; border-left: 4px solid #6366f1; }
-                .meta-item { font-size: 13px; margin: 6px 0; color: #9ca3af; }
-                .meta-label { color: #f3f4f6; font-weight: bold; }
-                .agenda-text { background: #030712; padding: 20px; border-radius: 8px; border: 1px solid #374151; font-family: inherit; font-size: 14px; white-space: pre-wrap; color: #f3f4f6; }
-                footer { font-size: 11px; color: #4b5563; margin-top: 40px; text-align: center; border-top: 1px solid #1f2937; padding-top: 16px; }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <h1>📝 Meeting Agenda & Details</h1>
-                <div class="meta-box">
-                  <div class="meta-item"><span class="meta-label">Allocation Space:</span> ${roomName}</div>
-                  <div class="meta-item"><span class="meta-label">Meeting Title:</span> ${summary}</div>
-                  <div class="meta-item"><span class="meta-label">Date & Time:</span> ${new Date(startDateTime).toLocaleString()} - ${new Date(endDateTime).toLocaleTimeString()}</div>
-                  <div class="meta-item"><span class="meta-label">Organized By:</span> ${userName} (${userEmail})</div>
-                  <div class="meta-item"><span class="meta-label">Faculty Member:</span> ${facultyId || 'Not specified'}</div>
-                  <div class="meta-item"><span class="meta-label">Attendee Email:</span> ${attendeeEmail || 'None'}</div>
-                </div>
-                <h2>📋 Agenda Details & Discussion Topics</h2>
-                <div class="agenda-text">${agenda || 'No agenda details were provided.'}</div>
-                <footer>
-                  Document saved automatically with Google Workspace Drive integration.<br>
-                  IIT BHU Smart Room Scheduler Dashboard
-                </footer>
-              </div>
-            </body>
-            </html>
-          `;
-          await DriveAPI.createLogFile(agendaFilename, agendaHtml);
-        } catch (gErr) {
-          console.warn('Google Workspace write failure, stored safely in Postgres:', gErr);
+          if (updatedEvent && updatedEvent.id) {
+            googleEventId = updatedEvent.id;
+            googleCalendarLink = updatedEvent.htmlLink || null;
+            googleSyncStatus = 'synced';
+            googleSyncError = null;
+          }
+        } else {
+          // Create new Google Calendar event
+          const calEvent = await CalendarAPI.createEvent({
+            roomName,
+            summary,
+            startTime: startDateTime,
+            endTime: endDateTime,
+            agenda: agenda || '',
+            attendeeEmail: attendeeEmail || '',
+            creatorName: userName || 'Faculty User',
+            creatorEmail: userEmail || 'user@iitbhu.ac.in',
+          });
+          if (calEvent && calEvent.id) {
+            googleEventId = calEvent.id;
+            googleCalendarLink = calEvent.htmlLink || null;
+            googleSyncStatus = 'synced';
+            googleSyncError = null;
+          }
         }
+      } catch (calErr: any) {
+        console.error('Google Calendar syncing failed during submit:', calErr);
+        googleSyncStatus = 'failed';
+        googleSyncError = calErr.message || 'Unknown calendar error';
+      }
+    }
+
+    try {
+      if (isEditing && editingBookingId) {
+        await bookingsAPI.update(editingBookingId, {
+          roomId: selectedRoomId,
+          roomName,
+          summary,
+          agenda,
+          startTime: startDateTime,
+          endTime: endDateTime,
+          attendeeEmail: attendeeEmail || undefined,
+          facultyId: facultyId || undefined,
+          google_event_id: googleEventId,
+          google_calendar_link: googleCalendarLink,
+          google_sync_status: googleSyncStatus,
+          google_sync_error: googleSyncError,
+          bypassConflict: bypassConflict
+        });
+      } else {
+        await bookingsAPI.create({
+          roomId: selectedRoomId,
+          roomName,
+          summary,
+          agenda,
+          startTime: startDateTime,
+          endTime: endDateTime,
+          attendeeEmail: attendeeEmail || undefined,
+          facultyId: facultyId || undefined,
+          google_event_id: googleEventId,
+          google_calendar_link: googleCalendarLink,
+          google_sync_status: googleSyncStatus,
+          google_sync_error: googleSyncError,
+          bypassConflict: bypassConflict
+        });
       }
 
       setShowBookModal(false);
@@ -779,6 +787,9 @@ export default function CalendarWidget({
       setAgenda('');
       setFacultyId('');
       setAttendeeEmail('');
+      setIsEditing(false);
+      setEditingBookingId(null);
+
       onBookingAdded(roomName, summary, startDateTime, endDateTime, agenda || '');
       await fetchCalendarEvents();
     } catch (err: any) {
@@ -799,18 +810,18 @@ export default function CalendarWidget({
 
     try {
       setLoading(true);
-      // 1. Delete from PostgreSQL database via API proxy
-      await bookingsAPI.delete(eventId);
 
-      // 2. Try cleanup from Google Calendar if token exists
-      const hasGoogleToken = !!sessionStorage.getItem('google_workspace_access_token');
-      if (hasGoogleToken) {
+      const targetEvent = events.find((e) => e.id === eventId);
+      if (targetEvent && targetEvent.google_event_id && isGoogleConnected) {
         try {
-          await CalendarAPI.deleteEvent(eventId);
-        } catch (gErr) {
-          console.warn('Google Calendar delete skipped:', gErr);
+          await CalendarAPI.deleteEvent(targetEvent.google_event_id);
+        } catch (calErr: any) {
+          console.error('Google Calendar event deletion failed:', calErr);
         }
       }
+
+      // Delete from PostgreSQL database via API proxy
+      await bookingsAPI.delete(eventId);
 
       await fetchCalendarEvents();
       onRefreshRoomsStatus();
@@ -826,14 +837,14 @@ export default function CalendarWidget({
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Calendar className="w-5 h-5 text-indigo-400" />
-          <h2 className="text-xl font-semibold tracking-tight">Google Calendar & Schedule</h2>
+          <h2 className="text-xl font-semibold tracking-tight">Interactive Booking Schedule</h2>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={fetchCalendarEvents}
             disabled={loading}
             className="p-2 text-slate-400 hover:text-white transition-colors hover:bg-slate-800 rounded-lg disabled:opacity-50"
-            title="Refresh from Google Calendar"
+            title="Refresh bookings directory"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -856,6 +867,56 @@ export default function CalendarWidget({
           </div>
         </div>
       )}
+
+      {/* Google Account Connection Status Card */}
+      <div className={`mb-6 p-4 rounded-xl border ${
+        isGoogleConnected 
+          ? 'bg-indigo-950/20 border-indigo-500/30' 
+          : 'bg-slate-950/40 border-slate-800/60'
+      } flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs`}>
+        <div className="flex items-center gap-3">
+          <div className={`p-2 rounded-lg ${isGoogleConnected ? 'bg-indigo-950/80 text-indigo-400 border border-indigo-500/20' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
+            <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+              <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.71 0 3.27.61 4.5 1.64l2.39-2.39C17.65 1.94 15.105 1 12.24 1 6.7 1 2.2 5.5 2.2 11s4.5 10 10.04 10c5.79 0 9.64-4.07 9.64-9.82 0-.66-.08-1.3-.22-1.895H12.24z"/>
+            </svg>
+          </div>
+          <div className="text-left">
+            <h4 className="font-semibold text-slate-200">
+              {isGoogleConnected ? 'Google Workspace Connected' : 'Google Workspace Integration'}
+            </h4>
+            <p className="text-slate-400 text-[11px] mt-0.5 leading-relaxed">
+              {isGoogleConnected 
+                ? `Synced to Google Calendar as ${googleUser?.email || 'Faculty Account'}`
+                : 'Connect your IIT-BHU Google Account to automatically sync schedules, create meetings, and access Workspace.'}
+            </p>
+          </div>
+        </div>
+        {isGoogleConnected ? (
+          <button
+            onClick={handleDisconnectGoogle}
+            className="px-3 py-1.5 rounded-lg border border-rose-800/40 bg-rose-950/20 hover:bg-rose-950/40 text-rose-300 transition-all font-medium whitespace-nowrap cursor-pointer"
+          >
+            Disconnect Account
+          </button>
+        ) : (
+          <button
+            onClick={handleConnectGoogle}
+            disabled={isConnectingGoogle}
+            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-all font-medium whitespace-nowrap flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
+          >
+            {isConnectingGoogle ? (
+              <>
+                <Loader className="w-3.5 h-3.5 animate-spin" />
+                Connecting...
+              </>
+            ) : (
+              <>
+                Connect Google Account
+              </>
+            )}
+          </button>
+        )}
+      </div>
 
       {loading && events.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 gap-2 text-slate-400">
@@ -928,13 +989,68 @@ export default function CalendarWidget({
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => handleDeleteEvent(event.id, event.summary)}
-                    className="mr-1 p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors md:opacity-0 group-hover:opacity-100 focus:opacity-100"
-                    title="Cancel reservation"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {/* Open in Google Calendar External Link */}
+                    {event.google_calendar_link && (
+                      <a
+                        href={event.google_calendar_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-indigo-950/40 rounded-lg transition-all"
+                        title="Open in Google Calendar"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
+
+                    {/* Edit Booking (Only if owner) */}
+                    {(event.creator?.email?.toLowerCase() === userEmail.toLowerCase()) && (
+                      <button
+                        onClick={() => {
+                          setIsEditing(true);
+                          setEditingBookingId(event.id);
+                          setSummary(event.summary || '');
+                          setAgenda(event.description || '');
+
+                          const matchedRoom = rooms.find(
+                            (r) => r.name.toLowerCase() === (event.location || '').toLowerCase()
+                          );
+                          if (matchedRoom) {
+                            setSelectedRoomId(matchedRoom.id);
+                          }
+
+                          if (start) {
+                            setDate(start.toISOString().split('T')[0]);
+                            const shStr = String(start.getHours()).padStart(2, '0') + ':' + String(start.getMinutes()).padStart(2, '0');
+                            setStartTime(shStr);
+                          }
+                          if (end) {
+                            const ehStr = String(end.getHours()).padStart(2, '0') + ':' + String(end.getMinutes()).padStart(2, '0');
+                            setEndTime(ehStr);
+                          }
+
+                          setFacultyId(event.faculty_id || '');
+                          setAttendeeEmail(event.attendees?.[0]?.email || '');
+                          setShowBookModal(true);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-950/20 rounded-lg transition-all"
+                        title="Edit meeting details"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {/* Delete Booking */}
+                    {(event.creator?.email?.toLowerCase() === userEmail.toLowerCase()) && (
+                      <button
+                        onClick={() => handleDeleteEvent(event.id, event.summary)}
+                        className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors"
+                        title="Cancel reservation"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {overlappingListedEvent && (
@@ -960,10 +1076,12 @@ export default function CalendarWidget({
             <div className="p-6 bg-slate-950 border-b border-slate-800/60 shrink-0">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-indigo-400" />
-                Book Room on Google Calendar
+                {isEditing ? 'Modify Scheduled Reservation' : 'Book Room on Google Calendar'}
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                Creates a real-world calendar event on your Google Account with full tracking.
+                {isEditing 
+                  ? 'Updates the active meeting details on the central database and Google Calendar.'
+                  : 'Creates a real-world calendar event on your Google Account with full tracking.'}
               </p>
             </div>
 
@@ -1378,7 +1496,11 @@ export default function CalendarWidget({
               <div className="flex items-center justify-end gap-3 pt-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setShowBookModal(false)}
+                  onClick={() => {
+                    setShowBookModal(false);
+                    setIsEditing(false);
+                    setEditingBookingId(null);
+                  }}
                   className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors hover:bg-slate-800 rounded-lg cursor-pointer"
                 >
                   Cancel
@@ -1388,8 +1510,8 @@ export default function CalendarWidget({
                   disabled={isSubmitting}
                   className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-md hover:shadow-indigo-950/50 flex items-center gap-1.5 disabled:opacity-50 transition-all cursor-pointer"
                 >
-                  {isSubmitting ? <Loader className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                  {isSubmitting ? 'Scheduling...' : 'Reserve Now'}
+                  {isSubmitting ? <Loader className="w-4 h-4 animate-spin" /> : isEditing ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                  {isSubmitting ? (isEditing ? 'Updating...' : 'Scheduling...') : isEditing ? 'Save Changes' : 'Reserve Now'}
                 </button>
               </div>
             </form>

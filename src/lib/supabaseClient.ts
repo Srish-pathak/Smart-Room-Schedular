@@ -11,18 +11,35 @@ const isValidUrl = (url: string): boolean => {
   }
 };
 
+const cleanEnvVar = (val: string): string => {
+  if (!val) return '';
+  let cleaned = val.trim();
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  if (cleaned.startsWith('SUPABASE_URL=')) {
+    cleaned = cleaned.slice('SUPABASE_URL='.length).trim();
+  }
+  if (cleaned.startsWith('SUPABASE_ANON_KEY=')) {
+    cleaned = cleaned.slice('SUPABASE_ANON_KEY='.length).trim();
+  }
+  return cleaned;
+};
+
 // Support both server and client-side env vars, including Vite injected globals and process env fallbacks
-const SUPABASE_URL = 
+const SUPABASE_URL = cleanEnvVar(
   (typeof process !== 'undefined' && process.env?.SUPABASE_URL) ||
   (import.meta as any).env?.VITE_SUPABASE_URL ||
   (import.meta as any).env?.SUPABASE_URL ||
-  '';
+  ''
+);
 
-const SUPABASE_ANON_KEY = 
+const SUPABASE_ANON_KEY = cleanEnvVar(
   (typeof process !== 'undefined' && process.env?.SUPABASE_ANON_KEY) ||
   (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ||
   (import.meta as any).env?.SUPABASE_ANON_KEY ||
-  '';
+  ''
+);
 
 const hasConfigValues = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 const urlIsValid = isValidUrl(SUPABASE_URL);
@@ -56,7 +73,7 @@ export function subscribeToSupabaseErrors(callback: ErrorSubscriber) {
 }
 
 export function reportSupabaseError(error: any, context?: string): Error {
-  console.error(`[Supabase Error] Context: ${context || 'General'}:`, error);
+  console.warn(`[Supabase Notification] Context: ${context || 'General'}:`, error);
   let userFriendlyMessage = 'An unexpected cloud database error occurred.';
   
   if (error) {

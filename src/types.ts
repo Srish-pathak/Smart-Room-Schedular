@@ -11,6 +11,7 @@ export interface Room {
   floor?: string;
   bestFor?: string;
   contactDepartment?: string;
+  buffer_time?: number;
 }
 
 export interface Booking {
@@ -24,6 +25,19 @@ export interface Booking {
   facultyId?: string;
   attendeeEmail?: string;
   eventId?: string;
+  agenda?: string;
+  google_event_id?: string | null;
+  google_calendar_link?: string | null;
+  google_sync_status?: string;
+  google_sync_error?: string | null;
+  room_id?: string;
+  room_name?: string;
+  start_time?: string;
+  end_time?: string;
+  creator_name?: string;
+  creator_email?: string;
+  faculty_id?: string;
+  attendee_email?: string;
 }
 
 export interface DriveFile {
@@ -43,4 +57,11 @@ export interface FormMetadata {
   formId: string;
   title: string;
   description?: string;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: 'user' | 'admin';
 }
