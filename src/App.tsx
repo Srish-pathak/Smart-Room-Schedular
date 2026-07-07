@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { initAuth, logout } from './lib/auth';
+import { useAuth } from './auth/useAuth';
+import { 
+  initAuth, 
+  logout, 
+  googleSignIn, 
+  firebaseRegisterWithEmailAndPassword, 
+  firebaseSignInWithEmailAndPassword 
+} from './lib/auth';
 import { Room } from './types';
 import { FloorPlanView } from './components/FloorPlanView';
 import {
@@ -13,7 +20,8 @@ import {
   setSessionToken,
   getSessionToken
 } from './lib/api';
-import { supabase, isSupabaseConfigured, subscribeToSupabaseErrors } from './lib/supabaseClient';
+import { collection, onSnapshot, getDocs, query, limit } from 'firebase/firestore';
+import { db } from './firebase/firebase';
 
 // Components
 import { CalendarAPI } from './lib/workspace';
@@ -25,6 +33,9 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { ActivityHistoryDrawer } from './components/ActivityHistoryDrawer';
 import { RoomDetailsDrawer } from './components/RoomDetailsDrawer';
 import { AdminPanel } from './components/AdminPanel';
+import { DashboardView } from './components/DashboardView';
+import { UserProfileView } from './components/UserProfileView';
+import { calculateRoomStatus } from './utils/roomStatus';
 
 // Icons
 import {
@@ -45,6 +56,8 @@ import {
   Clock,
   CheckCircle,
   Clock3,
+  LayoutDashboard,
+  User,
   SlidersHorizontal,
   Filter,
   Check,
@@ -97,12 +110,90 @@ const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
 
 
 export default function App() {
+  const { user: authUser, loading: authLoading, signIn, signUp, signInWithGoogle, logout: centralLogout, refreshUser } = useAuth();
+
+  // Startup Firebase connection health check states
+  const [checkingFirebase, setCheckingFirebase] = useState(true);
+  const [firebaseError, setFirebaseError] = useState<string | null>(null);
+
   // DB & Auth states
   const [user, setUser] = useState<any>(null);
   const [token, setToken] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
+
+  // Startup Health Check to verify Firebase connection and configuration
+  useEffect(() => {
+    let active = true;
+    const checkFirebase = async () => {
+      try {
+        if (!db) {
+          throw new Error("Firestore DB object is undefined. Please ensure your Firebase config in firebase-applet-config.json is valid.");
+        }
+        // Query rooms with a limit of 1 to verify the connection is active and the database exists
+        const roomsCol = collection(db, 'rooms');
+        await getDocs(query(roomsCol, limit(1)));
+        if (active) {
+          setCheckingFirebase(false);
+        }
+      } catch (err: any) {
+        console.error("Firebase connection health check failed:", err);
+        const msg = err.message || String(err);
+        let userFriendlyMsg = msg;
+        if (msg.includes("Database '(default)' not found")) {
+          userFriendlyMsg = "The Firestore database '(default)' was not found or is currently being provisioned. Please check your Firebase Console and ensure Firestore is enabled.";
+        } else if (msg.includes("permission-denied") || msg.includes("Missing or insufficient permissions")) {
+          // If we got permission-denied, that actually means we successfully connected to Firestore!
+          // The database exists and rejected the read, which is correct since security rules protect it.
+          if (active) {
+            setCheckingFirebase(false);
+          }
+          return;
+        } else if (msg.includes("offline") || msg.includes("unavailable") || msg.includes("Failed to get document")) {
+          userFriendlyMsg = "Unable to connect to Firestore. Please check your internet connection or try again later.";
+        }
+        if (active) {
+          setFirebaseError(userFriendlyMsg);
+          setCheckingFirebase(false);
+        }
+      }
+    };
+    checkFirebase();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+
+  useEffect(() => {
+    if (!authLoading) {
+      if (authUser) {
+        const u = {
+          name: authUser.fullName,
+          fullName: authUser.fullName,
+          email: authUser.email,
+          role: authUser.role === 'admin' ? 'admin' : 'user',
+          uid: authUser.uid,
+          profilePhoto: authUser.profilePhoto
+        };
+        setUser(u);
+        const storedToken = getSessionToken();
+        setToken(storedToken);
+        setNeedsAuth(false);
+        // Safely trigger initial model fetch
+        try {
+          fetchDashboardModels(u.role);
+        } catch (e) {
+          console.warn('Deferred dashboard models fetch on mount.');
+        }
+      } else {
+        setUser(null);
+        setToken(null);
+        setNeedsAuth(true);
+      }
+    }
+  }, [authUser, authLoading]);
 
   // High-performance theme state supporting system preferences & persistence
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -122,7 +213,7 @@ export default function App() {
   const isHighContrast = false;
 
   // Form states for login/signup
-  const [loginEmail, setLoginEmail] = useState('');
+  const [loginEmail, setLoginEmail] = useState(() => localStorage.getItem('rememberedEmail') || '');
   const [loginPassword, setLoginPassword] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
@@ -130,6 +221,21 @@ export default function App() {
   const [registerRole, setRegisterRole] = useState<'user' | 'admin'>('user');
 
   const [isIframe, setIsIframe] = useState(false);
+
+  // Transition redirect state
+  const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
+  const [lastAuthUser, setLastAuthUser] = useState<any>(null);
+
+  useEffect(() => {
+    if (authUser && !lastAuthUser) {
+      setShowWelcomeOverlay(true);
+      const timer = setTimeout(() => {
+        setShowWelcomeOverlay(false);
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+    setLastAuthUser(authUser);
+  }, [authUser, lastAuthUser]);
 
   // Resilient Custom Confirmation Modal state to replace window.confirm blocks (which crash inside sandbox iframes)
   const [confirmModal, setConfirmModal] = useState<{
@@ -172,7 +278,7 @@ export default function App() {
       return unique;
     });
   };
-  const [activeTab, setActiveTab] = useState<'rooms' | 'calendar' | 'admin'>('rooms');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'rooms' | 'calendar' | 'profile' | 'admin'>('dashboard');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [compareRooms, setCompareRooms] = useState<Room[]>([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -192,17 +298,180 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
 
   // Filters state for Rooms Directory
+  const [selectedBuilding, setSelectedBuilding] = useState<string>('all');
   const [minCapacity, setMinCapacity] = useState<number>(0);
   const [statusFilter, setStatusFilter] = useState<'all' | 'available'>('all');
   const [selectedFeatureToggles, setSelectedFeatureToggles] = useState<string[]>([]);
+  
+  const uniqueBuildings = useMemo(() => {
+    const buildingsSet = new Set<string>();
+    rooms.forEach((room) => {
+      if (room.building) buildingsSet.add(room.building);
+    });
+    return Array.from(buildingsSet);
+  }, [rooms]);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number>(-1);
+  const [srAnnouncement, setSrAnnouncement] = useState<string>('');
+  const searchContainerRef = React.useRef<HTMLDivElement>(null);
+
+  interface SuggestionItem {
+    id: string;
+    type: 'building' | 'category' | 'room';
+    text: string;
+    subtext: string;
+    value: string;
+  }
+
+  const highlightMatch = (text: string, query: string, isSelected: boolean) => {
+    if (!query.trim()) return <span>{text}</span>;
+    const escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${escapedQuery})`, 'gi'));
+    return (
+      <>
+        {parts.map((part, i) => {
+          const isMatch = part.toLowerCase() === query.toLowerCase();
+          if (isMatch) {
+            return (
+              <span
+                key={i}
+                className={`font-black tracking-wide ${
+                  isSelected
+                    ? (isDarkMode ? 'text-white underline decoration-white/40 underline-offset-2' : 'text-indigo-950')
+                    : (isDarkMode ? 'text-indigo-400' : 'text-indigo-600')
+                }`}
+              >
+                {part}
+              </span>
+            );
+          }
+          return (
+            <span key={i} className="font-normal opacity-90">
+              {part}
+            </span>
+          );
+        })}
+      </>
+    );
+  };
+
+  const autocompleteSuggestions = useMemo<SuggestionItem[]>(() => {
+    if (!searchQuery.trim()) return [];
+    const query = searchQuery.toLowerCase().trim();
+    
+    const suggestedBuildings = new Set<string>();
+    const suggestedCategories = new Set<string>();
+    const suggestedRooms: Room[] = [];
+    
+    for (const r of rooms) {
+      if (r.building && r.building.toLowerCase().includes(query)) {
+        suggestedBuildings.add(r.building);
+      }
+      if (r.category && r.category.toLowerCase().includes(query)) {
+        suggestedCategories.add(r.category);
+      }
+      if (r.name.toLowerCase().includes(query)) {
+        suggestedRooms.push(r);
+      }
+    }
+    
+    const items: SuggestionItem[] = [];
+    
+    // Add Building suggestions
+    Array.from(suggestedBuildings).slice(0, 3).forEach(b => {
+      items.push({
+        id: `building-${b}`,
+        type: 'building',
+        text: b,
+        subtext: 'Search rooms in this building',
+        value: b
+      });
+    });
+    
+    // Add Category suggestions
+    Array.from(suggestedCategories).slice(0, 3).forEach(c => {
+      items.push({
+        id: `category-${c}`,
+        type: 'category',
+        text: c,
+        subtext: 'Search rooms of this category',
+        value: c
+      });
+    });
+    
+    // Add Room suggestions
+    suggestedRooms.slice(0, 4).forEach(r => {
+      items.push({
+        id: `room-${r.id}`,
+        type: 'room',
+        text: r.name,
+        subtext: r.building ? `${r.building} • Floor: ${r.floor || 'N/A'}` : 'Specific room space',
+        value: r.name
+      });
+    });
+    
+    return items.slice(0, 8);
+  }, [rooms, searchQuery]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (showSuggestions && activeSuggestionIndex >= 0 && activeSuggestionIndex < autocompleteSuggestions.length) {
+      const activeItem = autocompleteSuggestions[activeSuggestionIndex];
+      setSrAnnouncement(`Suggestion ${activeSuggestionIndex + 1} of ${autocompleteSuggestions.length}: ${activeItem.text}, ${activeItem.subtext} (${activeItem.type})`);
+    } else if (showSuggestions && autocompleteSuggestions.length > 0) {
+      setSrAnnouncement(`${autocompleteSuggestions.length} suggestions found. Use up and down arrows to navigate, or escape to close.`);
+    } else if (showSuggestions && searchQuery.trim() !== '') {
+      setSrAnnouncement('No suggestions found.');
+    } else {
+      setSrAnnouncement('');
+    }
+  }, [activeSuggestionIndex, autocompleteSuggestions, showSuggestions, searchQuery]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (autocompleteSuggestions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveSuggestionIndex((prev) => 
+        prev < autocompleteSuggestions.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveSuggestionIndex((prev) => 
+        prev > 0 ? prev - 1 : autocompleteSuggestions.length - 1
+      );
+    } else if (e.key === 'Enter') {
+      if (activeSuggestionIndex >= 0 && activeSuggestionIndex < autocompleteSuggestions.length) {
+        e.preventDefault();
+        const selected = autocompleteSuggestions[activeSuggestionIndex];
+        setSearchQuery(selected.value);
+        setShowSuggestions(false);
+        setActiveSuggestionIndex(-1);
+      }
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false);
+      setActiveSuggestionIndex(-1);
+    }
+  };
+
   const [sortKey, setSortKey] = useState<'default' | 'capacity-asc' | 'capacity-desc' | 'available-first' | 'booked-first'>('default');
   const [directoryViewMode, setDirectoryViewMode] = useState<'grid' | 'floorplan'>('grid');
   const [showFilters, setShowFilters] = useState<boolean>(false);
 
-  // Auto-refresh timer states for Rooms Directory
-  const [roomsRefreshCountdown, setRoomsRefreshCountdown] = useState<number>(60);
-  const [isRefreshingRooms, setIsRefreshingRooms] = useState<boolean>(false);
+  // Loading resources state
+  const [loadingResources, setLoadingResources] = useState<boolean>(true);
 
   // Offline caching systems tracking state
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
@@ -275,29 +544,16 @@ export default function App() {
     async function checkSession() {
       const storedToken = getSessionToken();
       if (storedToken) {
+        setToken(storedToken);
         try {
-          setToken(storedToken);
           const meResponse = await authAPI.getMe();
           if (meResponse && meResponse.user) {
             setUser(meResponse.user);
             setNeedsAuth(false);
-            fetchDashboardModels(meResponse.user.role);
-            addToast(`Welcome back, ${meResponse.user.name}!`, 'success');
-          } else {
-            throw new Error('Invalid user profile payload.');
           }
         } catch (err) {
-          console.warn('Cached JWT session token verification failed. Returning to sign-in.', err);
-          setSessionToken(null);
-          setToken(null);
-          setUser(null);
-          setNeedsAuth(true);
+          console.warn('Eager local session load deferred to AuthProvider.', err);
         }
-      } else {
-        // No session exists, keep credentials portal active for standard sign in or custom registration
-        setToken(null);
-        setUser(null);
-        setNeedsAuth(true);
       }
     }
     checkSession();
@@ -313,12 +569,8 @@ export default function App() {
 
 
 
-  // Register centralized error listener for Supabase cloud queries and network operations failures
+  // Register centralized status listeners
   useEffect(() => {
-    const unsubscribe = subscribeToSupabaseErrors((message) => {
-      addToast(message, 'error');
-    });
-
     const handleSyncStatus = (event: Event) => {
       const customEvent = event as CustomEvent;
       const { type, source, timestamp } = customEvent.detail;
@@ -344,7 +596,6 @@ export default function App() {
     window.addEventListener('offline', handleOfflineStatus);
 
     return () => {
-      unsubscribe();
       window.removeEventListener('iitbhu_sync_status', handleSyncStatus);
       window.removeEventListener('online', handleOnlineStatus);
       window.removeEventListener('offline', handleOfflineStatus);
@@ -352,6 +603,7 @@ export default function App() {
   }, []);
 
   const fetchDashboardModels = async (role: string) => {
+    setLoadingResources(true);
     try {
       // 1. Fetch live rooms
       try {
@@ -397,42 +649,12 @@ export default function App() {
         console.warn('Could not populate live notifications:', ne);
       }
 
-      // Reset auto-refresh timer upon successful fetch
-      setRoomsRefreshCountdown(60);
     } catch (err: any) {
       console.error('Failed loading resources general error:', err);
+    } finally {
+      setLoadingResources(false);
     }
   };
-
-  // Implement automatic background refresh timer for Rooms Directory database sync every 60 seconds
-  useEffect(() => {
-    if (!token) return;
-
-    const intervalId = setInterval(() => {
-      setRoomsRefreshCountdown((prev) => {
-        if (prev <= 1) {
-          setIsRefreshingRooms(true);
-          // Fetch fresh rooms and bookings to ensure availability statuses are instantly up-to-date
-          Promise.all([roomsAPI.list(), bookingsAPI.list()])
-            .then(([refreshedRooms, refreshedBookings]) => {
-              setRooms(Array.isArray(refreshedRooms) ? refreshedRooms : []);
-              setAdminBookings(Array.isArray(refreshedBookings) ? refreshedBookings : []);
-              console.log('🔄 Rooms Directory automatically synced with Postgres database (60s timer)');
-            })
-            .catch((err) => {
-              console.error('Auto-refresh failed:', err);
-            })
-            .finally(() => {
-              setIsRefreshingRooms(false);
-            });
-          return 60;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(intervalId);
-  }, [token]);
 
   const handleMarkNotificationsRead = async () => {
     try {
@@ -443,94 +665,55 @@ export default function App() {
     }
   };
 
-  // Poll for background notification updates to keep state synced without manual reloads
+  // Realtime Firestore Subscription to keep lists synchronized instantly
   useEffect(() => {
-    if (!token) return;
-    const intervalIdx = setInterval(() => {
-      notificationsAPI.list()
-        .then((notifList) => {
-          setNotifications(Array.isArray(notifList) ? notifList : []);
-        })
-        .catch(() => {});
-    }, 8000);
-    return () => clearInterval(intervalIdx);
-  }, [token]);
+    if (!token || !user) return;
 
-  // Realtime Supabase Subscription to keep lists synchronized instantly
-  useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !token || !user) return;
-
-    console.log('⚡ Establishing live Supabase Realtime subscriptions...');
+    console.log('⚡ Establishing live Firestore Realtime subscriptions...');
 
     // 1. Subscribe to Bookings Table
-    const bookingsChannel = supabase
-      .channel('realtime:bookings')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'bookings' },
-        (payload) => {
-          console.log('🔔 Realtime Bookings Update witnessed:', payload);
-          // Reload all state modules
-          fetchDashboardModels(user.role);
+    const unsubscribeBookings = onSnapshot(collection(db, 'bookings'), (snapshot) => {
+      console.log('🔔 Realtime Bookings Update witnessed via Firestore');
+      fetchDashboardModels(user.role);
 
-          // Render live feedback / announcements depending on mutation event
-          if (payload.eventType === 'INSERT') {
-            const b = payload.new;
-            addToast(`Room Bound: "${b.room_name || 'Room'}" booked for "${b.summary}"`, 'success');
-          } else if (payload.eventType === 'DELETE') {
-            addToast('A booking reservation has been cancelled.', 'info');
-          } else if (payload.eventType === 'UPDATE') {
-            addToast('Booking status or info has been updated.', 'info');
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          // Avoid triggering toast on initial load by checking if the metadata has pending writes
+          const b = change.doc.data();
+          if (!snapshot.metadata.hasPendingWrites) {
+            // Toast can be displayed if a user added a room/booking recently
           }
         }
-      )
-      .subscribe();
+      });
+    }, (error) => {
+      console.warn('Firestore bookings snapshot subscription failed:', error);
+    });
 
     // 2. Subscribe to Rooms Table
-    const roomsChannel = supabase
-      .channel('realtime:rooms')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'rooms' },
-        (payload) => {
-          console.log('🔔 Realtime Rooms Update witnessed:', payload);
-          fetchDashboardModels(user.role);
-          if (payload.eventType === 'UPDATE') {
-            addToast(`Room attributes updated: "${payload.new.name || 'Room'}"`, 'info');
-          }
-        }
-      )
-      .subscribe();
+    const unsubscribeRooms = onSnapshot(collection(db, 'rooms'), (snapshot) => {
+      console.log('🔔 Realtime Rooms Update witnessed via Firestore');
+      fetchDashboardModels(user.role);
+    }, (error) => {
+      console.warn('Firestore rooms snapshot subscription failed:', error);
+    });
 
     // 3. Subscribe to Notifications Table
-    const notificationsChannel = supabase
-      .channel('realtime:notifications')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications' },
-        (payload) => {
-          console.log('🔔 Realtime Notifications Update witnessed:', payload);
-          if (payload.eventType === 'INSERT') {
-            // Append the new notification to state immediately
-            setNotifications((prev) => [payload.new, ...(Array.isArray(prev) ? prev : [])].slice(0, 50));
-            addToast(`System Notification: ${payload.new.title}`, 'info');
-          } else {
-            // Hot reload full notification panel
-            notificationsAPI.list()
-              .then((list) => setNotifications(Array.isArray(list) ? list : []))
-              .catch(() => {});
-          }
-        }
-      )
-      .subscribe();
+    const unsubscribeNotifications = onSnapshot(collection(db, 'notifications'), (snapshot) => {
+      console.log('🔔 Realtime Notifications Update witnessed via Firestore');
+      notificationsAPI.list()
+        .then((list) => setNotifications(Array.isArray(list) ? list : []))
+        .catch(() => {});
+    }, (error) => {
+      console.warn('Firestore notifications snapshot subscription failed:', error);
+    });
 
     return () => {
-      console.log('⚡ Cleaned up live Supabase Realtime subscriptions.');
-      supabase.removeChannel(bookingsChannel);
-      supabase.removeChannel(roomsChannel);
-      supabase.removeChannel(notificationsChannel);
+      console.log('⚡ Cleaned up live Firestore Realtime subscriptions.');
+      unsubscribeBookings();
+      unsubscribeRooms();
+      unsubscribeNotifications();
     };
-  }, [token, user?.role, isSupabaseConfigured]);
+  }, [token, user?.role]);
 
   // ==========================================
   // SIGN IN & REGISTRATION CONTROLLERS
@@ -541,15 +724,11 @@ export default function App() {
     e.preventDefault();
     setIsLoggingIn(true);
     try {
-      const response = await authAPI.login({ email: loginEmail, password: loginPassword });
-      setSessionToken(response.token, true);
-      setUser(response.user);
-      setToken(response.token);
-      setNeedsAuth(false);
-      addToast(`Access granted! Welcome, ${response.user.name}.`, 'success');
-      fetchDashboardModels(response.user.role);
+      const result = await signIn(loginEmail, loginPassword, true);
+      addToast(`Access granted! Welcome, ${result.userProfile.fullName}.`, 'success');
     } catch (err: any) {
-      addToast(err.message || 'Incorrect login coordinates.', 'info');
+      addToast(err.message || 'Incorrect login coordinates.', 'error');
+      throw err;
     } finally {
       setIsLoggingIn(false);
     }
@@ -559,20 +738,26 @@ export default function App() {
     e.preventDefault();
     setIsLoggingIn(true);
     try {
-      const response = await authAPI.register({
-        email: registerEmail.toLowerCase(),
-        password: registerPassword,
-        name: registerName,
-        role: registerRole
-      });
-      setSessionToken(response.token, true);
-      setUser(response.user);
-      setToken(response.token);
-      setNeedsAuth(false);
-      addToast(`Account registered successfully. Custom role assigned: ${response.user.role}`, 'success');
-      fetchDashboardModels(response.user.role);
+      const mappedRole = registerRole === 'admin' ? 'admin' : 'student';
+      const result = await signUp(registerEmail.toLowerCase(), registerPassword, registerName, mappedRole);
+      addToast(`Account registered successfully via Firebase! Welcome, ${result.userProfile.fullName}.`, 'success');
     } catch (err: any) {
-      addToast(err.message || 'Registration failed.', 'info');
+      addToast(err.message || 'Registration failed.', 'error');
+      throw err;
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setIsLoggingIn(true);
+    try {
+      const result = await signInWithGoogle();
+      addToast(`Google Sign In succeeded! Welcome, ${result.userProfile.fullName}.`, 'success');
+    } catch (err: any) {
+      console.warn('Google Sign In Notice:', err);
+      addToast(err.message || 'Google Sign In failed. Open the app in its own tab or check popup permissions.', 'error');
+      throw err;
     } finally {
       setIsLoggingIn(false);
     }
@@ -586,13 +771,13 @@ export default function App() {
       confirmText: 'Sign Out',
       cancelText: 'Keep Session Open',
       isDanger: true,
-      onConfirm: () => {
-        setSessionToken(null);
-        sessionStorage.removeItem('google_workspace_access_token');
-        setUser(null);
-        setToken(null);
-        setNeedsAuth(true);
-        addToast('Credentials session closed safely.', 'info');
+      onConfirm: async () => {
+        try {
+          await centralLogout();
+          addToast('Credentials session closed safely.', 'info');
+        } catch (err: any) {
+          addToast('Sign out encountered a small issue.', 'info');
+        }
       }
     });
   };
@@ -644,6 +829,7 @@ export default function App() {
     const filtered = list.filter((room) => {
       if (room.capacity < minCapacity) return false;
       if (statusFilter === 'available' && room.status !== 'available') return false;
+      if (selectedBuilding !== 'all' && room.building !== selectedBuilding) return false;
       for (const f of selectedFeatureToggles) {
         if (!matchesFeature(room, f)) return false;
       }
@@ -677,7 +863,7 @@ export default function App() {
       });
     }
     return filtered;
-  }, [rooms, minCapacity, statusFilter, selectedFeatureToggles, searchQuery, sortKey]);
+  }, [rooms, minCapacity, statusFilter, selectedFeatureToggles, searchQuery, sortKey, selectedBuilding]);
 
   const userBookings = useMemo(() => {
     if (!user?.email) return [];
@@ -739,7 +925,113 @@ export default function App() {
   // ==========================================
   // VIEW RENDER Gate
   // ==========================================
-  if (needsAuth || !user) {
+  if (checkingFirebase) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
+        {/* background grid */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(99,102,241,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(99,102,241,0.05)_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-indigo-500/10 rounded-full blur-[80px] pointer-events-none" />
+        
+        <div className="text-center space-y-6 z-10 max-w-sm">
+          <div className="relative w-16 h-16 mx-auto">
+            <Loader2 className="w-16 h-16 text-indigo-500 animate-spin absolute inset-0" />
+            <div className="w-12 h-12 rounded-full bg-indigo-950 border border-indigo-500/30 flex items-center justify-center font-bold text-sm text-indigo-400 absolute top-2 left-2 shadow-inner">
+              BHU
+            </div>
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-lg font-bold tracking-tight">Verifying Space Scheduler Connection</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Establishing a secure connection with Firestore Database and checking server health...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (firebaseError) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
+        {/* background grid */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(239,68,68,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(239,68,68,0.05)_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-red-500/5 rounded-full blur-[90px] pointer-events-none" />
+        
+        <motion.div 
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-slate-900 border border-red-900/40 rounded-2xl p-8 max-w-md w-full shadow-2xl z-10 relative space-y-6"
+        >
+          <div className="flex items-center gap-4 border-b border-slate-800 pb-5">
+            <div className="w-12 h-12 rounded-xl bg-red-950/50 border border-red-500/30 flex items-center justify-center text-red-400 shadow-inner">
+              <AlertTriangle className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <h3 className="text-lg font-extrabold tracking-tight text-white">Connection Interrupted</h3>
+              <p className="text-xs text-red-400 font-mono">Firebase Configuration Issue</p>
+            </div>
+          </div>
+
+          <div className="bg-red-950/25 border border-red-900/30 rounded-xl p-4 font-mono text-xs text-red-300 leading-relaxed">
+            {firebaseError}
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase">Suggested Remedies</h4>
+            <ul className="text-xs text-slate-400 space-y-2 list-disc list-inside">
+              <li>Ensure the Firebase console has <strong className="text-white">Firestore Database</strong> enabled.</li>
+              <li>Verify that the <code className="text-indigo-400 font-mono">firebase-blueprint.json</code> database rules are fully applied.</li>
+              <li>Check your internet connection or check the dev console logs for detailed error contexts.</li>
+            </ul>
+          </div>
+
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full py-3 px-4 rounded-xl bg-red-600 hover:bg-red-500 font-bold text-sm tracking-wide text-white transition-all shadow-lg shadow-red-500/20 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Retry Connection Setup
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (needsAuth || !user || showWelcomeOverlay) {
+    if (showWelcomeOverlay && user) {
+      return (
+        <div className={`min-h-screen ${isDarkMode ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'} flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans`}>
+          {/* background gradient */}
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(99,102,241,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(99,102,241,0.05)_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-indigo-500/10 rounded-full blur-[80px] pointer-events-none" />
+          
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-center space-y-6 z-10 relative max-w-md"
+          >
+            <div className="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black text-2xl mx-auto shadow-xl shadow-indigo-500/25 animate-bounce">
+              IIT
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                Welcome Back, {user?.name || user?.email || 'User'}!
+              </h2>
+              <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} font-medium`}>
+                Preparing your IIT BHU Smart Scheduler workspace...
+              </p>
+            </div>
+            
+            <div className="flex items-center justify-center gap-1.5">
+              <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full animate-bounce [animation-delay:-0.3s]" />
+              <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full animate-bounce [animation-delay:-0.15s]" />
+              <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full animate-bounce" />
+            </div>
+          </motion.div>
+        </div>
+      );
+    }
+
     return (
       <LoginView
         isDarkMode={isDarkMode}
@@ -763,6 +1055,7 @@ export default function App() {
         fillPredefinedCredentials={fillPredefinedCredentials}
         handleCredentialsLogin={handleCredentialsLogin}
         handleCredentialsRegister={handleCredentialsRegister}
+        handleGoogleSignIn={handleGoogleSignIn}
       />
     );
   }
@@ -848,8 +1141,10 @@ export default function App() {
             {/* Horizontal Navigation Menu for Desktop */}
             <nav className="hidden lg:flex items-center gap-2 relative">
               {[
+                { label: 'Dashboard', tab: 'dashboard', action: () => { setActiveTab('dashboard'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
                 { label: 'Rooms Directory', tab: 'rooms', action: () => { setActiveTab('rooms'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
                 { label: 'Interactive Calendar', tab: 'calendar', action: () => { setActiveTab('calendar'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+                { label: 'My Profile', tab: 'profile', action: () => { setActiveTab('profile'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
                 ...(user?.role === 'admin' ? [{ label: 'Admin Center', tab: 'admin', action: () => { setActiveTab('admin'); window.scrollTo({ top: 0, behavior: 'smooth' }); } }] : [])
               ].map((item) => {
                 const isActive = activeTab === item.tab;
@@ -961,11 +1256,11 @@ export default function App() {
                   : 'border-[#ead29c]/50 bg-[#faf8f2]'
               }`}>
                 <div className="w-8 h-8 rounded-full bg-[#0a4735] border border-[#dfb965]/40 flex items-center justify-center font-bold text-xs text-[#dfb965]">
-                  {user.name.charAt(0)}
+                  {(user?.name || user?.email || 'User').charAt(0).toUpperCase()}
                 </div>
                 <div className="text-left leading-none font-sans">
-                  <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user.name}</span>
-                  <span className="text-[9px] text-[#c09728] font-semibold uppercase font-mono">{user.role === 'admin' ? 'Platform Admin' : 'User'}</span>
+                  <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user?.name || user?.email || 'User'}</span>
+                  <span className="text-[9px] text-[#c09728] font-semibold uppercase font-mono">{user?.role === 'admin' ? 'Platform Admin' : 'User'}</span>
                 </div>
                 <button
                   onClick={handleSignout}
@@ -1038,8 +1333,10 @@ export default function App() {
                     Core Dashboard
                   </div>
                   {[
+                    { label: 'Dashboard', tab: 'dashboard', action: () => { setActiveTab('dashboard'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
                     { label: 'Rooms Directory', tab: 'rooms', action: () => { setActiveTab('rooms'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
                     { label: 'Interactive Calendar', tab: 'calendar', action: () => { setActiveTab('calendar'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+                    { label: 'My Profile', tab: 'profile', action: () => { setActiveTab('profile'); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
                     ...(user.role === 'admin' ? [{ label: 'Admin Center', tab: 'admin', action: () => { setActiveTab('admin'); window.scrollTo({ top: 0, behavior: 'smooth' }); } }] : []),
                   ].map((item) => {
                     const isActive = activeTab === item.tab;
@@ -1070,11 +1367,11 @@ export default function App() {
               }`}>
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-[#0a4735] flex items-center justify-center font-bold text-sm text-[#dfb965]">
-                    {user.name.charAt(0)}
+                    {(user?.name || user?.email || 'User').charAt(0).toUpperCase()}
                   </div>
                   <div className="text-left leading-tight flex-1 font-sans">
-                    <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user.name}</span>
-                    <span className={`text-[10px] block truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{user.email}</span>
+                    <span className={`text-xs font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user?.name || user?.email || 'User'}</span>
+                    <span className={`text-[10px] block truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{user?.email}</span>
                   </div>
                 </div>
 
@@ -1266,15 +1563,15 @@ export default function App() {
                       ? 'bg-indigo-950/80 border-indigo-700/60 text-indigo-300' 
                       : 'bg-indigo-50 border-indigo-200 text-indigo-700'
                   }`}>
-                    {user.name.charAt(0)}
+                    {(user?.name || user?.email || 'User').charAt(0).toUpperCase()}
                   </div>
                   <div className="leading-tight flex-1 min-w-0">
-                    <span className={`text-sm font-bold block truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user.name}</span>
+                    <span className={`text-sm font-bold block truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{user?.name || user?.email || 'User'}</span>
                     <span className={`text-[8.5px] font-extrabold uppercase py-0.5 px-1.5 rounded font-mono inline-block mt-0.5 ${
-                      user.role === 'admin' ? (isDarkMode ? 'bg-red-950/80 text-red-300 border border-red-800/35' : 'bg-red-50 text-red-700 border border-red-200') : 
+                      user?.role === 'admin' ? (isDarkMode ? 'bg-red-950/80 text-red-300 border border-red-800/35' : 'bg-red-50 text-red-700 border border-red-200') : 
                       (isDarkMode ? 'bg-amber-950/80 text-amber-350 border border-amber-800/35' : 'bg-amber-50 text-amber-700 border border-amber-200')
                     }`}>
-                      {user.role === 'admin' ? 'Platform Admin' : 'User'}
+                      {user?.role === 'admin' ? 'Platform Admin' : 'User'}
                     </span>
                   </div>
                 </div>
@@ -1304,6 +1601,18 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <button
+                    onClick={() => setActiveTab('dashboard')}
+                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                      activeTab === 'dashboard'
+                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <LayoutDashboard className="w-4 h-4 shrink-0" />
+                    <span>Campus Dashboard</span>
+                  </button>
+
+                  <button
                     onClick={() => setActiveTab('rooms')}
                     className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
                       activeTab === 'rooms'
@@ -1325,6 +1634,18 @@ export default function App() {
                   >
                     <Calendar className="w-4 h-4 shrink-0" />
                     <span>Calendar Scheduler</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('profile')}
+                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                      activeTab === 'profile'
+                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <User className="w-4 h-4 shrink-0" />
+                    <span>My Profile</span>
                   </button>
 
                   {user?.role === 'admin' && (
@@ -1351,6 +1672,17 @@ export default function App() {
               <div className="block lg:hidden overflow-x-auto pb-1 mb-4">
                 <div className="flex items-center gap-1.5 border-b border-slate-800/60">
                   <button
+                    onClick={() => setActiveTab('dashboard')}
+                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
+                      activeTab === 'dashboard'
+                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
+                        : 'border-transparent text-slate-400 hover:text-slate-250'
+                    }`}
+                  >
+                    <LayoutDashboard className="w-3.5 h-3.5 shrink-0" />
+                    <span>Dashboard</span>
+                  </button>
+                  <button
                     onClick={() => setActiveTab('rooms')}
                     className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
                       activeTab === 'rooms'
@@ -1371,6 +1703,17 @@ export default function App() {
                   >
                     <Calendar className="w-3.5 h-3.5 shrink-0" />
                     <span>Calendar</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('profile')}
+                    className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wider py-3 px-4 border-b-2 transition-all cursor-pointer shrink-0 ${
+                      activeTab === 'profile'
+                        ? 'border-indigo-500 text-white bg-indigo-950/20 font-bold'
+                        : 'border-transparent text-slate-400 hover:text-slate-250'
+                    }`}
+                  >
+                    <User className="w-3.5 h-3.5 shrink-0" />
+                    <span>Profile</span>
                   </button>
                   {user.role === 'admin' && (
                     <button
@@ -1401,6 +1744,41 @@ export default function App() {
                 className="w-full"
               >
               {/* ==========================================
+                  TAB: CAMPUS DASHBOARD
+                  ========================================== */}
+              {activeTab === 'dashboard' && (
+                <DashboardView
+                  user={user}
+                  rooms={rooms}
+                  bookings={adminBookings}
+                  isDarkMode={isDarkMode}
+                  onNavigateTab={(tab) => { setActiveTab(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  onSelectRoomForDetails={(room) => setSelectedRoomForDetails(room)}
+                  onBookRoom={(room) => {
+                    setConfirmRoomSelection(room);
+                    setPreselectedRoomId(room.id);
+                    setActiveTab('calendar');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                />
+              )}
+
+              {/* ==========================================
+                  TAB: MY PROFILE
+                  ========================================== */}
+              {activeTab === 'profile' && (
+                <UserProfileView
+                  user={user}
+                  bookings={adminBookings}
+                  isDarkMode={isDarkMode}
+                  onProfileUpdated={async () => {
+                    await refreshUser();
+                  }}
+                  addToast={addToast}
+                />
+              )}
+
+              {/* ==========================================
                   TAB: ROOMS DIRECTORY
                   ========================================== */}
               {activeTab === 'rooms' && (
@@ -1413,7 +1791,7 @@ export default function App() {
                         <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono">IIT BHU Campus Scheduler 👋</span>
                         <h2 className="text-xl font-extrabold tracking-tight text-white">Need to book an academic space today?</h2>
                         <p className="text-xs text-slate-350 max-w-2xl leading-relaxed">
-                          Welcome, <strong className="text-indigo-300">{user.name}</strong>. Browse live room statuses below. Click <strong className="text-indigo-300">"CHOOSE SLOT"</strong> to customize a schedule inside our interactive calendar, or click <button onClick={() => setIsQRScannerOpen(true)} className="text-indigo-300 font-extrabold hover:underline cursor-pointer bg-transparent border-none p-0 inline font-mono">"QR Scanner"</button> to check in instantly!
+                          Welcome, <strong className="text-indigo-300">{user?.name || user?.email || 'User'}</strong>. Browse live room statuses below. Click <strong className="text-indigo-300">"CHOOSE SLOT"</strong> to customize a schedule inside our interactive calendar, or click <button onClick={() => setIsQRScannerOpen(true)} className="text-indigo-300 font-extrabold hover:underline cursor-pointer bg-transparent border-none p-0 inline font-mono">"QR Scanner"</button> to check in instantly!
                         </p>
                       </div>
                       <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
@@ -1514,11 +1892,25 @@ export default function App() {
                                   <span className="text-xs bg-indigo-900/60 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded-lg border border-indigo-800/45 uppercase tracking-wider">
                                     {b.room_name}
                                   </span>
-                                  <span className="text-[10px] text-indigo-400 font-mono font-black">
-                                    {isToday ? 'TODAY' : startDate.toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] uppercase font-extrabold ${
+                                      b.status === 'Approved' ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-900/35' :
+                                      b.status === 'Rejected' ? 'bg-rose-950/60 text-rose-400 border border-rose-900/35' :
+                                      'bg-amber-950/60 text-amber-400 border border-amber-900/35 animate-pulse'
+                                    }`}>
+                                      {b.status || 'Approved'}
+                                    </span>
+                                    <span className="text-[10px] text-indigo-400 font-mono font-black">
+                                      {isToday ? 'TODAY' : startDate.toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                    </span>
+                                  </div>
                                 </div>
                                 <h4 className="text-sm font-bold text-white leading-snug tracking-tight">{b.summary}</h4>
+                                {b.status === 'Rejected' && (b.rejectionReason || b.rejection_reason) && (
+                                  <p className="text-[10px] text-rose-400 italic bg-rose-950/20 border border-rose-900/30 p-2 rounded-lg mt-1 text-left">
+                                    Reason: {b.rejectionReason || b.rejection_reason}
+                                  </p>
+                                )}
                                 <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono">
                                   <Clock className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                                   <span>{timeStr}</span>
@@ -1675,8 +2067,8 @@ export default function App() {
                       <div className="flex items-center gap-2.5 flex-wrap">
                         <h2 className="text-lg font-bold tracking-tight">Active Room Directory</h2>
                         <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-indigo-950/80 text-indigo-400 border border-indigo-900/60 transition-all select-none font-mono">
-                          <Clock className={`w-3.5 h-3.5 ${isRefreshingRooms ? 'animate-spin text-emerald-400' : 'text-indigo-400'}`} />
-                          {isRefreshingRooms ? 'SYNCING DATABASE...' : `AUTO-SYNC IN ${roomsRefreshCountdown}S`}
+                          <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                          REAL-TIME
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1.5">
@@ -1702,15 +2094,108 @@ export default function App() {
 
                   {/* Search and Advanced Filters Toggle */}
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                    <div className="md:col-span-7 relative">
+                    <div className="md:col-span-7 relative" ref={searchContainerRef}>
                       <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                       <input
                         type="text"
                         placeholder="Search rooms by name or equipment (e.g. Whiteboard, Projector)..."
                         value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onChange={(e) => {
+                          setSearchQuery(e.target.value);
+                          setShowSuggestions(true);
+                          setActiveSuggestionIndex(-1);
+                        }}
+                        onFocus={() => setShowSuggestions(true)}
+                        onKeyDown={handleKeyDown}
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={showSuggestions && autocompleteSuggestions.length > 0}
+                        aria-controls="room-search-suggestions"
+                        aria-haspopup="listbox"
+                        aria-activedescendant={
+                          showSuggestions && activeSuggestionIndex >= 0 && autocompleteSuggestions[activeSuggestionIndex]
+                            ? autocompleteSuggestions[activeSuggestionIndex].id
+                            : undefined
+                        }
                         className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl py-2.5 pl-10 pr-4 text-xs text-slate-200 placeholder:text-slate-500 outline-none transition-all shadow-md text-left"
                       />
+
+                      {/* Screen reader live region for announcements */}
+                      <div className="sr-only" aria-live="polite" aria-atomic="true">
+                        {srAnnouncement}
+                      </div>
+
+                      {/* Autocomplete Suggestions List */}
+                      {showSuggestions && autocompleteSuggestions.length > 0 && (
+                        <div 
+                          className={`absolute left-0 right-0 top-full mt-2 z-50 max-h-72 overflow-y-auto rounded-xl border p-1.5 shadow-2xl backdrop-blur-md transition-all ${
+                            isDarkMode 
+                              ? 'bg-slate-950/95 border-slate-800 shadow-slate-950/50 text-slate-100' 
+                              : 'bg-white/95 border-slate-200 shadow-slate-200/50 text-slate-800'
+                          }`}
+                          id="room-search-suggestions"
+                          role="listbox"
+                          aria-label="Room search suggestions"
+                        >
+                          {autocompleteSuggestions.map((item, index) => {
+                            const Icon = item.type === 'building' 
+                              ? Building2 
+                              : item.type === 'category' 
+                              ? Layers 
+                              : Search;
+                            
+                            const isSelected = index === activeSuggestionIndex;
+                            
+                            return (
+                              <button
+                                key={item.id}
+                                id={item.id}
+                                type="button"
+                                role="option"
+                                aria-selected={isSelected}
+                                onClick={() => {
+                                  setSearchQuery(item.value);
+                                  setShowSuggestions(false);
+                                  setActiveSuggestionIndex(-1);
+                                }}
+                                onMouseEnter={() => setActiveSuggestionIndex(index)}
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                                  isSelected 
+                                    ? (isDarkMode ? 'bg-indigo-600/90 text-white' : 'bg-indigo-50 text-indigo-900') 
+                                    : (isDarkMode ? 'hover:bg-slate-900/60 text-slate-200' : 'hover:bg-slate-50 text-slate-700')
+                                }`}
+                              >
+                                <div className={`p-1.5 rounded-md ${
+                                  isSelected 
+                                    ? (isDarkMode ? 'bg-indigo-500/30 text-white' : 'bg-indigo-100 text-indigo-700') 
+                                    : (isDarkMode ? 'bg-slate-900 text-indigo-400' : 'bg-slate-100 text-indigo-600')
+                                }`}>
+                                  <Icon className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className={`text-xs truncate leading-none font-medium ${
+                                    isSelected 
+                                      ? (isDarkMode ? 'text-white' : 'text-slate-950') 
+                                      : (isDarkMode ? 'text-slate-300' : 'text-slate-705')
+                                  }`}>
+                                    {highlightMatch(item.text, searchQuery, isSelected)}
+                                  </div>
+                                  <div className={`text-[10px] truncate mt-1 ${
+                                    isSelected 
+                                      ? (isDarkMode ? 'text-indigo-200' : 'text-indigo-600/80') 
+                                      : (isDarkMode ? 'text-slate-400' : 'text-slate-500')
+                                  }`}>
+                                    {highlightMatch(item.subtext, searchQuery, isSelected)}
+                                  </div>
+                                </div>
+                                <span className="text-[9px] font-mono opacity-60 uppercase tracking-widest px-1.5 py-0.5 rounded border border-current shrink-0">
+                                  {item.type}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                     
                     <div className="md:col-span-3 relative">
@@ -1739,9 +2224,9 @@ export default function App() {
                       >
                         <SlidersHorizontal className="w-4 h-4" />
                         <span>Filters</span>
-                        {(minCapacity > 0 || statusFilter !== 'all' || selectedFeatureToggles.length > 0) && (
+                        {(minCapacity > 0 || statusFilter !== 'all' || selectedFeatureToggles.length > 0 || selectedBuilding !== 'all') && (
                           <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] flex items-center justify-center font-bold">
-                            {(minCapacity > 0 ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + selectedFeatureToggles.length}
+                            {(minCapacity > 0 ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + selectedFeatureToggles.length + (selectedBuilding !== 'all' ? 1 : 0)}
                           </span>
                         )}
                       </button>
@@ -1762,11 +2247,12 @@ export default function App() {
                             <SlidersHorizontal className="w-4 h-4 text-indigo-400" />
                             <span className="text-xs font-bold uppercase tracking-wider text-slate-200">Refining Filters</span>
                           </div>
-                          {(minCapacity > 0 || statusFilter !== 'all' || selectedFeatureToggles.length > 0 || searchQuery.trim() !== '' || sortKey !== 'default') && (
+                          {(minCapacity > 0 || statusFilter !== 'all' || selectedFeatureToggles.length > 0 || searchQuery.trim() !== '' || sortKey !== 'default' || selectedBuilding !== 'all') && (
                             <button
                               onClick={() => {
                                 setMinCapacity(0);
                                 setStatusFilter('all');
+                                setSelectedBuilding('all');
                                 setSelectedFeatureToggles([]);
                                 setSearchQuery('');
                                 setSortKey('default');
@@ -1779,7 +2265,7 @@ export default function App() {
                           )}
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-2 text-left">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-5 pt-2 text-left">
                           <div className="space-y-2">
                             <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Minimum Capacity Seats</span>
                             <div className="flex flex-wrap gap-1.5">
@@ -1821,6 +2307,22 @@ export default function App() {
                                 );
                               })}
                             </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Building Campus Zone</span>
+                            <select
+                              value={selectedBuilding}
+                              onChange={(e) => setSelectedBuilding(e.target.value)}
+                              className="text-[11px] font-bold w-full py-2 px-3 rounded-lg border transition-all bg-slate-950 border-slate-800 text-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                            >
+                              <option value="all">All Academic Buildings</option>
+                              {uniqueBuildings.map((b) => (
+                                <option key={b} value={b}>
+                                  {b}
+                                </option>
+                              ))}
+                            </select>
                           </div>
 
                           <div className="space-y-2">
@@ -1897,10 +2399,36 @@ export default function App() {
                   {/* Rooms Cards Grid / Floor Plan Mapping Conditional Branch */}
                   {directoryViewMode === 'grid' ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8" id="directory-section">
-                      {filteredRooms.map((room) => {
+                      {loadingResources ? (
+                        Array.from({ length: 4 }).map((_, index) => (
+                          <div key={index} className="bg-slate-900 border border-slate-850 rounded-3xl overflow-hidden shadow-md animate-pulse p-5 space-y-5 flex flex-col justify-between">
+                            <div className="space-y-4">
+                              <div className="h-44 bg-slate-800 rounded-2xl w-full" />
+                              <div className="space-y-2">
+                                <div className="h-5 bg-slate-800 rounded w-3/4" />
+                                <div className="h-3 bg-slate-800 rounded w-1/2" />
+                              </div>
+                            </div>
+                            <div className="flex gap-2 pt-4">
+                              <div className="h-10 bg-slate-800 rounded-xl w-24" />
+                              <div className="h-10 bg-slate-800 rounded-xl w-24" />
+                            </div>
+                          </div>
+                        ))
+                      ) : filteredRooms.length === 0 ? (
+                        <div className="col-span-1 md:col-span-2 py-16 text-center bg-slate-900 border border-slate-800 rounded-3xl p-8">
+                          <SlidersHorizontal className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+                          <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider">No matching rooms found</h3>
+                          <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                            We couldn't find any rooms that match your active criteria. Try clearing some filters or searching for another keyphrase.
+                          </p>
+                        </div>
+                      ) : (
+                        filteredRooms.map((room) => {
                         // Generate reliable ratings based on room capacity & features
                         const rating = room.capacity > 100 ? '4.9' : room.capacity > 30 ? '4.8' : '4.7';
                         const reviewCount = room.capacity > 100 ? '42 reviews' : room.capacity > 30 ? '28 reviews' : '15 reviews';
+                        const liveStatus = calculateRoomStatus(room, adminBookings);
                         
                         return (
                           <div
@@ -1920,14 +2448,16 @@ export default function App() {
                                 {/* Live Availability Status Indicator */}
                                 <div className="absolute top-4 left-4">
                                   <span className={`text-[10px] font-extrabold uppercase py-1.5 px-3 rounded-xl font-mono border flex items-center gap-1.5 shadow-md ${
-                                    room.status === 'available' 
+                                    liveStatus.status === 'available' 
                                       ? 'bg-emerald-50 text-emerald-800 border-emerald-200/60' 
+                                      : liveStatus.status === 'reserved_soon'
+                                      ? 'bg-amber-50 text-amber-800 border-amber-200/60'
                                       : 'bg-rose-50 text-rose-800 border-rose-200/60'
                                   }`}>
                                     <span className={`w-2 h-2 rounded-full ${
-                                      room.status === 'available' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
+                                      liveStatus.status === 'available' ? 'bg-emerald-500 animate-pulse' : liveStatus.status === 'reserved_soon' ? 'bg-amber-500 animate-bounce' : 'bg-rose-500'
                                     }`} />
-                                    {room.status === 'available' ? 'AVAILABLE' : 'OCCUPIED'}
+                                    {liveStatus.status === 'available' ? 'AVAILABLE' : liveStatus.status === 'reserved_soon' ? 'RESERVED SOON' : 'OCCUPIED'}
                                   </span>
                                 </div>
 
@@ -1961,6 +2491,10 @@ export default function App() {
                                         {room.building}
                                       </span>
                                     )}
+                                  </div>
+                                  <div className="mt-2 text-[10.5px] bg-black/40 backdrop-blur-sm border border-white/10 rounded-lg p-2 flex items-center gap-1.5 text-slate-300 font-mono">
+                                    <Clock className="w-3.5 h-3.5 text-[#dfb965] shrink-0" />
+                                    <span className="truncate">{liveStatus.nextMessage}</span>
                                   </div>
                                 </div>
                               </div>
@@ -2094,7 +2628,7 @@ export default function App() {
                                   View Details
                                 </button>
 
-                                {room.status === 'available' ? (
+                                {liveStatus.status === 'available' ? (
                                   <button
                                     onClick={() => {
                                       setConfirmRoomSelection(room);
@@ -2106,17 +2640,23 @@ export default function App() {
                                   </button>
                                 ) : (
                                   <button
-                                    disabled
-                                    className="px-4 py-2.5 bg-slate-100 border border-slate-200 text-slate-400 rounded-xl text-[10px] font-bold uppercase tracking-wider cursor-not-allowed"
+                                    onClick={() => {
+                                      setPreselectedRoomId(room.id);
+                                      setActiveTab('calendar');
+                                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                                    }}
+                                    className="px-4.5 py-2.5 bg-indigo-650 hover:bg-indigo-600 text-white rounded-xl text-[10px] font-extrabold uppercase tracking-wider shadow-md hover:shadow-lg transition-all cursor-pointer hover:-translate-y-0.5"
+                                    title="View scheduling grid for this space"
                                   >
-                                    Occupied
+                                    Schedule
                                   </button>
                                 )}
                               </div>
                             </div>
                           </div>
                         );
-                      })}
+                      })
+                      )}
                     </div>
                   ) : (
                   <FloorPlanView
@@ -2144,8 +2684,9 @@ export default function App() {
                 <div className="space-y-2">
                   <CalendarWidget
                     rooms={rooms}
-                    userEmail={user.email}
-                    userName={user.name}
+                    userEmail={user?.email || ''}
+                    userName={user?.name || user?.email || 'User'}
+                    userRole={user?.role || 'student'}
                     onRefreshRoomsStatus={syncRoomsStatusFromCalendar}
                     onBookingAdded={handleNewBookingRegistered}
                     defaultSelectedRoomId={preselectedRoomId}
@@ -2156,7 +2697,7 @@ export default function App() {
               {/* ==========================================
                   TAB: ADMIN OFFICE MASTER CONTROL CENTER
                   ========================================== */}
-              {activeTab === 'admin' && user.role === 'admin' && (
+              {activeTab === 'admin' && user?.role === 'admin' && (
                 <AdminPanel
                   rooms={rooms}
                   adminBookings={adminBookings}
@@ -2167,6 +2708,7 @@ export default function App() {
                   setConfirmModal={setConfirmModal}
                   auditLogs={auditLogs}
                   setAuditLogs={setAuditLogs}
+                  isDarkMode={isDarkMode}
                 />
               )}
 
@@ -2194,7 +2736,7 @@ export default function App() {
                 t.type === 'error'
                   ? 'bg-rose-950/95 border-rose-800 text-rose-200 shadow-rose-950/50'
                   : t.type === 'success'
-                  ? 'bg-indigo-950/95 border-indigo-805 text-indigo-150'
+                  ? 'bg-indigo-950/95 border-indigo-800 text-indigo-100'
                   : 'bg-slate-900/95 border-slate-800 text-slate-200'
               }`}
             >
@@ -2222,7 +2764,7 @@ export default function App() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-805 rounded-3xl p-6 max-w-sm w-full space-y-6 text-center"
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-6 text-center"
             >
               <div className="space-y-1.5">
                 <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest font-mono">QR PLAQUE SENSOR DECODER</span>
@@ -2295,7 +2837,7 @@ export default function App() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-805 rounded-3xl p-6 max-w-sm w-full space-y-6 text-center"
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-6 text-center"
             >
               <div className="space-y-1">
                 <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest block font-mono">Confirm Space Selection</span>
@@ -2318,7 +2860,7 @@ export default function App() {
                     setActiveTab('calendar');
                     addToast(`Set pre-assigned classroom space: ${confirmRoomSelection.name}`);
                   }}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-505 text-white py-2.5 rounded-xl text-xs font-bold uppercase transition shadow-lg shadow-indigo-950/20"
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-xs font-bold uppercase transition shadow-lg shadow-indigo-950/20"
                 >
                   Go to Scheduler
                 </button>
@@ -2371,7 +2913,7 @@ export default function App() {
       <footer className="py-6 border-t border-slate-900/80 mt-12 bg-slate-900/40">
         <div className="max-w-7xl mx-auto px-6 text-center text-slate-500 text-[10px] font-mono uppercase tracking-wider space-y-1">
           <span>created by srishti pathak iit bhu 2026</span><br />
-          <span>Smart Room reservation panel • connected to cloud postgres nodes</span>
+          <span>Smart Room reservation panel • connected to cloud firestore database</span>
         </div>
       </footer>
 

@@ -1,9 +1,16 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
-
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+import { 
+  signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  User,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  updateProfile
+} from 'firebase/auth';
+import { auth } from '../firebase/firebase';
+export { auth };
 
 const provider = new GoogleAuthProvider();
 
@@ -68,7 +75,10 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     // Check if running in an iframe context
     const isIframe = window.self !== window.top;
     if (isIframe) {
-      console.warn("Firebase Auth in an iframe may trigger popup blockers. Recommend 'Open in New Tab' flow.");
+      console.warn("Firebase Auth in an iframe. Redirecting...");
+      sessionStorage.setItem('auth_redirect_pending', 'true');
+      await signInWithRedirect(auth, provider);
+      return null;
     }
 
     const signInPromise = signInWithPopup(auth, provider);
@@ -134,4 +144,64 @@ export const clearAccessToken = () => {
 export const logout = async () => {
   await auth.signOut();
   clearAccessToken();
+};
+
+export const firebaseRegisterWithEmailAndPassword = async (email: string, name: string, password: string): Promise<User> => {
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    await updateProfile(user, { displayName: name });
+    return user;
+  } catch (error: any) {
+    console.warn('Firebase Email/Password Signup Notice:', error);
+    if (error.code === 'auth/email-already-in-use') {
+      throw new Error('This email address is already registered in Firebase.');
+    } else if (error.code === 'auth/invalid-email') {
+      throw new Error('The email address is invalid.');
+    } else if (error.code === 'auth/weak-password') {
+      throw new Error('The password is too weak. Please use at least 6 characters.');
+    }
+    throw new Error(error.message || 'Firebase email/password signup failed.');
+  }
+};
+
+export const firebaseSignInWithEmailAndPassword = async (email: string, password: string): Promise<User> => {
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    return userCredential.user;
+  } catch (error: any) {
+    console.warn('Firebase Email/Password Signin Notice:', error);
+    
+    // Auto-onboard/register if the user does not exist or if we get invalid-credential
+    const lowerEmail = email.toLowerCase();
+    if (
+      lowerEmail === 'admin@iitbhu.ac.in' || 
+      lowerEmail === 'student@iitbhu.ac.in' ||
+      error.code === 'auth/user-not-found' ||
+      error.code === 'auth/invalid-credential' ||
+      error.message?.includes('user-not-found') ||
+      error.message?.includes('invalid-credential')
+    ) {
+      try {
+        console.log('Attempting seamless auto-registration for testing:', email);
+        const name = lowerEmail.includes('admin') ? 'Prof. Rajeev (Admin)' : 'Abishek (User)';
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        await updateProfile(user, { displayName: name });
+        return user;
+      } catch (signUpError: any) {
+        // If they already exist, then the original signin failed because of a wrong password
+        if (signUpError.code === 'auth/email-already-in-use') {
+          throw new Error('Invalid password for this registered email.');
+        }
+        // Otherwise, propagate the signup error
+        throw signUpError;
+      }
+    }
+
+    if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+      throw new Error('Invalid email or password credentials. Please register or double check password.');
+    }
+    throw new Error(error.message || 'Firebase email/password signin failed.');
+  }
 };

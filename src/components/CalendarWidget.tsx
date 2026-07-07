@@ -25,6 +25,7 @@ interface CalendarWidgetProps {
   rooms: Room[];
   userEmail: string;
   userName: string;
+  userRole?: string;
   onRefreshRoomsStatus: () => void;
   onBookingAdded: (roomName: string, summary: string, startTime: string, endTime: string, agenda?: string) => void;
   defaultSelectedRoomId?: string;
@@ -34,6 +35,7 @@ export default function CalendarWidget({
   rooms = [],
   userEmail,
   userName,
+  userRole = 'student',
   onRefreshRoomsStatus,
   onBookingAdded,
   defaultSelectedRoomId,
@@ -352,8 +354,9 @@ export default function CalendarWidget({
     try {
       // Fetch central database reservations
       const dbBookings = await bookingsAPI.list();
+      const bookingsArray = Array.isArray(dbBookings) ? dbBookings : [];
       
-      const mappedDbEvents = dbBookings.map((b: any) => ({
+      const mappedDbEvents = bookingsArray.map((b: any) => ({
         id: b.id,
         summary: b.summary,
         description: b.agenda,
@@ -820,7 +823,7 @@ export default function CalendarWidget({
         }
       }
 
-      // Delete from PostgreSQL database via API proxy
+      // Delete booking via API proxy
       await bookingsAPI.delete(eventId);
 
       await fetchCalendarEvents();
@@ -1041,7 +1044,7 @@ export default function CalendarWidget({
                     )}
 
                     {/* Delete Booking */}
-                    {(event.creator?.email?.toLowerCase() === userEmail.toLowerCase()) && (
+                    ((event.creator?.email?.toLowerCase() === userEmail.toLowerCase()) || userRole === 'admin') && (
                       <button
                         onClick={() => handleDeleteEvent(event.id, event.summary)}
                         className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors"
@@ -1049,7 +1052,7 @@ export default function CalendarWidget({
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
-                    )}
+                    )
                   </div>
                 </div>
 
@@ -1485,6 +1488,41 @@ export default function CalendarWidget({
                   </div>
                 </motion.div>
               )}
+
+              {/* Dynamic Confirmation Summary Card (Requirement 5) */}
+              <div className="p-4 bg-emerald-950/25 border border-emerald-500/30 rounded-2xl space-y-2 text-left">
+                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest block font-mono">
+                  📋 RESERVATION SUMMARY CONFIRMATION
+                </span>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                  <div>
+                    <span className="text-slate-500 block text-[9.5px] uppercase font-mono">Selected Room</span>
+                    <strong className="text-white font-extrabold">{selectedRoomName || 'Not Selected'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[9.5px] uppercase font-mono">Building Location</span>
+                    <strong className="text-emerald-300 font-extrabold">{selectedRoom?.building || 'Main Campus'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[9.5px] uppercase font-mono">Scheduled Date</span>
+                    <strong className="text-white font-extrabold font-mono">{date || 'TBD'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[9.5px] uppercase font-mono">Time Window</span>
+                    <strong className="text-white font-extrabold font-mono">
+                      {startTime || 'TBD'} – {endTime || 'TBD'}
+                    </strong>
+                  </div>
+                </div>
+                {(summary || agenda) && (
+                  <div className="pt-2 border-t border-emerald-950/40 text-xs">
+                    <span className="text-slate-500 block text-[9.5px] uppercase font-mono">Intended Purpose</span>
+                    <p className="text-slate-300 font-medium line-clamp-2 mt-0.5">
+                      {summary ? `"${summary}"` : ''} {agenda ? `— ${agenda}` : ''}
+                    </p>
+                  </div>
+                )}
+              </div>
 
               <div className="flex items-center gap-2 p-3 bg-indigo-950/40 border border-indigo-900/30 rounded-xl text-[11px] text-indigo-300">
                 <Users className="w-4 h-4 shrink-0" />

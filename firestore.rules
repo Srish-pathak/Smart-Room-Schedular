@@ -1,7 +1,28 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
+    
+    // Security rules for IIT BHU Smart Rooms Scheduler
+    // Supports both the authenticated client-side SDK operations
+    // and the server-side backend proxy.
+
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    match /rooms/{roomId} {
+      allow read, write: if true;
+    }
+
+    match /bookings/{bookingId} {
+      allow read, write: if true;
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if true;
+    }
+
+    match /audit_logs/{logId} {
       allow read, write: if true;
     }
   }

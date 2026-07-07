@@ -90,11 +90,23 @@ export default function QRScannerModal({ isOpen, onClose, rooms, onCheckInSucces
     } catch (err: any) {
       console.error('Camera access error:', err);
       setCameraState('error');
-      setCameraErrorMsg(
-        err.message?.includes('Permission') || err.name === 'NotAllowedError'
-          ? 'Camera access denied. Please grant camera permission in your browser.'
-          : 'Unable to access camera. Your device may not have a camera or it is in use by another app.'
-      );
+      
+      const isIframe = window.self !== window.top;
+      let msg = '';
+      if (err.message?.includes('Permission') || err.name === 'NotAllowedError' || err.name === 'SecurityError') {
+        msg = 'Camera access denied. ';
+        if (isIframe) {
+          msg += 'Browsers block iframe camera access by default in preview modes. Please click the "Open in New Tab" icon in the top-right of your screen to run it directly, or use our fully-functional "Scan Simulator" or "Upload Photo" tabs to test!';
+        } else {
+          msg += 'Please grant camera permission in your browser address bar/settings.';
+        }
+      } else {
+        msg = 'Unable to access camera. Your device may not have a camera or it is in use by another app.';
+        if (isIframe) {
+          msg += ' Try opening the app in its own tab, or use the "Scan Simulator" / "Upload Photo" tab.';
+        }
+      }
+      setCameraErrorMsg(msg);
     }
   };
 

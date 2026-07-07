@@ -38,6 +38,14 @@ export interface Booking {
   creator_email?: string;
   faculty_id?: string;
   attendee_email?: string;
+  status?: 'Pending' | 'Approved' | 'Rejected';
+  rejectionReason?: string;
+  rejection_reason?: string;
+  userId?: string;
+  user_id?: string;
+  date?: string;
+  purpose?: string;
+  roomId?: string;
 }
 
 export interface DriveFile {

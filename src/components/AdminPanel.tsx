@@ -7,7 +7,11 @@ import {
   Shield, 
   FileSpreadsheet, 
   Upload as UploadIcon, 
-  AlertTriangle 
+  AlertTriangle,
+  Check,
+  X,
+  Clock,
+  ShieldAlert
 } from 'lucide-react';
 import { Room, Booking, User } from '../types';
 import { roomsAPI, adminAPI, bookingsAPI, auditAPI } from '../lib/api';
@@ -24,6 +28,7 @@ interface AdminPanelProps {
   setConfirmModal: (modal: any) => void;
   auditLogs: any[];
   setAuditLogs: React.Dispatch<React.SetStateAction<any[]>>;
+  isDarkMode?: boolean;
 }
 
 export function AdminPanel({
@@ -36,10 +41,16 @@ export function AdminPanel({
   setConfirmModal,
   auditLogs,
   setAuditLogs,
+  isDarkMode = true,
 }: AdminPanelProps) {
   // Tabs & Views States
   const [adminRoomTab, setAdminRoomTab] = useState<'single' | 'bulk'>('single');
   const [adminTrendView, setAdminTrendView] = useState<'daily' | 'weekly'>('daily');
+
+  // Approval flow states
+  const [rejectingBookingId, setRejectingBookingId] = useState<string | null>(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+  const [isSubmittingApproval, setIsSubmittingApproval] = useState<string | null>(null);
 
   // Single Room creation form state
   const [adminRoomName, setAdminRoomName] = useState('');
@@ -665,7 +676,88 @@ export function AdminPanel({
         occupancyStats={occupancyStats}
         adminTrendView={adminTrendView}
         setAdminTrendView={setAdminTrendView}
+        isDarkMode={isDarkMode}
       />
+
+      {/* Pending Academic Booking Approvals */}
+      <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl mb-6">
+        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 pb-3 border-b border-slate-850 mb-4 text-left">
+          <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
+          Pending Academic Booking Approvals ({adminBookings.filter(b => b.status === 'Pending').length})
+        </h3>
+        {adminBookings.filter(b => b.status === 'Pending').length === 0 ? (
+          <p className="text-slate-500 italic text-xs py-6 text-center bg-slate-950/40 border border-slate-850/40 rounded-xl">
+            No pending reservations require attention. Great job!
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto">
+            {adminBookings.filter(b => b.status === 'Pending').map((b) => (
+              <div
+                key={b.id}
+                className="p-4 bg-slate-950 border border-amber-900/30 rounded-xl flex flex-col justify-between text-xs gap-3 text-left animate-fade-in relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 bg-amber-500/10 text-amber-450 px-2 py-0.5 rounded-bl-lg font-bold tracking-wider font-mono text-[9px] uppercase animate-pulse">
+                  Pending
+                </div>
+                
+                <div className="space-y-1.5 w-full">
+                  <span className="font-extrabold text-indigo-300 block text-sm">Space: {b.room_name}</span>
+                  <span className="font-semibold text-slate-200 block text-xs">Purpose: {b.summary}</span>
+                  {b.agenda && (
+                    <span className="text-slate-400 block italic bg-slate-900/40 p-2 rounded border border-slate-850/50">
+                      Agenda: {b.agenda}
+                    </span>
+                  )}
+                  <div className="space-y-0.5 pt-1 text-slate-400 font-mono text-[10px]">
+                    <span className="block">📅 Date: {new Date(b.start_time).toLocaleDateString()}</span>
+                    <span className="block">🕒 Time: {new Date(b.start_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - {new Date(b.end_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</span>
+                    <span className="block text-slate-450">👤 Requester: <strong className="text-slate-300">{b.creator_name}</strong> ({b.creator_email})</span>
+                    {b.faculty_id && <span className="block text-slate-450">🎓 Sponsor ID: <strong className="text-slate-300">{b.faculty_id}</strong></span>}
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-slate-850/70 flex items-center justify-end gap-2.5">
+                  <button
+                    disabled={isSubmittingApproval !== null}
+                    onClick={async () => {
+                      setRejectingBookingId(b.id);
+                      setRejectionReasonInput('');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-950/50 text-rose-300 hover:bg-rose-900 border border-rose-800/40 text-[10px] font-bold cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Reject Request
+                  </button>
+                  <button
+                    disabled={isSubmittingApproval !== null}
+                    onClick={async () => {
+                      try {
+                        setIsSubmittingApproval(b.id);
+                        addToast(`Approving slot and generating Meet & Calendar invites...`, 'info');
+                        await bookingsAPI.approve(b.id);
+                        addToast('Booking successfully approved and synced!', 'success');
+                        onRefreshData();
+                      } catch (err: any) {
+                        addToast(err.message || 'Approval failed', 'error');
+                      } finally {
+                        setIsSubmittingApproval(null);
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800/40 text-[10px] font-bold cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isSubmittingApproval === b.id ? (
+                      <span className="w-3.5 h-3.5 border-2 border-emerald-300 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    Approve & Sync
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Active Bookings Master Sweep */}
       <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl">
@@ -958,6 +1050,53 @@ export function AdminPanel({
           </div>
         )}
       </div>
+
+      {/* Rejection Reason Prompt Modal */}
+      {rejectingBookingId && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-md animate-scale-in text-left">
+            <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-2 flex items-center gap-2">
+              <ShieldAlert className="w-5 h-5 text-rose-500" />
+              Specify Rejection Reason
+            </h4>
+            <p className="text-slate-400 text-xs mb-4">
+              Please enter the academic justification or scheduling reason for rejecting this booking request. An automated email will notify the student.
+            </p>
+            <textarea
+              value={rejectionReasonInput}
+              onChange={(e) => setRejectionReasonInput(e.target.value)}
+              placeholder="e.g. Overlapping department exam session, or Room closed for maintenance."
+              className="w-full bg-slate-950 border border-slate-800 text-xs text-white rounded-lg p-3 min-h-[100px] mb-4 focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setRejectingBookingId(null)}
+                className="px-4 py-2 text-xs bg-slate-950 text-slate-400 rounded-lg hover:bg-slate-850 transition-all font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!rejectionReasonInput.trim()}
+                onClick={async () => {
+                  try {
+                    const id = rejectingBookingId;
+                    setRejectingBookingId(null);
+                    addToast('Processing rejection and cleaning schedules...', 'info');
+                    await bookingsAPI.reject(id, rejectionReasonInput);
+                    addToast('Booking successfully rejected.', 'success');
+                    onRefreshData();
+                  } catch (err: any) {
+                    addToast(err.message || 'Rejection failed', 'error');
+                  }
+                }}
+                className="px-4 py-2 text-xs bg-rose-950/70 text-rose-300 rounded-lg border border-rose-800/40 hover:bg-rose-900 transition-all font-semibold disabled:opacity-40"
+              >
+                Confirm Rejection
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
