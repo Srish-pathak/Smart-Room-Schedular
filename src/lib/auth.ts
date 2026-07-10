@@ -1,7 +1,6 @@
 import { 
   signInWithPopup, 
   signInWithRedirect,
-  getRedirectResult,
   GoogleAuthProvider, 
   onAuthStateChanged, 
   User,
@@ -183,7 +182,7 @@ export const firebaseSignInWithEmailAndPassword = async (email: string, password
       error.message?.includes('invalid-credential')
     ) {
       try {
-        console.log('Attempting seamless auto-registration for testing:', email);
+        console.info('Attempting seamless auto-registration for testing:', email);
         const name = lowerEmail.includes('admin') ? 'Prof. Rajeev (Admin)' : 'Abishek (User)';
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;

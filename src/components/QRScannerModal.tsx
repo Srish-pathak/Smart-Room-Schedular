@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { useState, useEffect, useRef } from 'react';
+import { motion } from 'motion/react';
 import { 
   X, Camera, Upload, CheckCircle2, AlertCircle, Sparkles, 
-  RefreshCw, Scan, Maximize, Landmark, Building, HelpCircle 
+  RefreshCw, Scan, Landmark, HelpCircle 
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { Room } from '../types';
@@ -138,7 +138,7 @@ export default function QRScannerModal({ isOpen, onClose, rooms, onCheckInSucces
         });
 
         if (code) {
-          console.log('🎯 Found QR Code in camera stream:', code.data);
+          console.info('🎯 Found QR Code in camera stream:', code.data);
           handleScannedData(code.data, 'camera');
           return; // Stop the loop on successful detection
         }

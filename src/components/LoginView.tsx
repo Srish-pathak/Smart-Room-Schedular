@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sun, 
@@ -7,7 +7,6 @@ import {
   Building2, 
   Users, 
   Calendar, 
-  CheckCircle, 
   Zap, 
   Video, 
   ShieldCheck, 

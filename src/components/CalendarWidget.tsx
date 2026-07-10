@@ -1044,7 +1044,7 @@ export default function CalendarWidget({
                     )}
 
                     {/* Delete Booking */}
-                    ((event.creator?.email?.toLowerCase() === userEmail.toLowerCase()) || userRole === 'admin') && (
+                    {((event.creator?.email?.toLowerCase() === userEmail.toLowerCase()) || userRole === 'admin') && (
                       <button
                         onClick={() => handleDeleteEvent(event.id, event.summary)}
                         className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors"
@@ -1052,7 +1052,7 @@ export default function CalendarWidget({
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
-                    )
+                    )}
                   </div>
                 </div>
 

@@ -8,9 +8,10 @@ interface ForgotPasswordProps {
 }
 
 export function ForgotPassword({ onSwitchToLogin, isDarkMode }: ForgotPasswordProps) {
-  const { resetPassword } = useAuth();
+  const { resetPassword, signInWithSandboxBypass } = useAuth();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingBypass, setLoadingBypass] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -45,6 +46,19 @@ export function ForgotPassword({ onSwitchToLogin, isDarkMode }: ForgotPasswordPr
     }
   };
 
+  const handleBypassLogin = async () => {
+    setError(null);
+    setLoadingBypass(true);
+    try {
+      await signInWithSandboxBypass(email);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Sandbox bypass failed. Please try normal registration or sign in.');
+    } finally {
+      setLoadingBypass(false);
+    }
+  };
+
   return (
     <div className="w-full max-w-md mx-auto p-2 font-sans">
       <div className="mb-6 text-center">
@@ -57,13 +71,36 @@ export function ForgotPassword({ onSwitchToLogin, isDarkMode }: ForgotPasswordPr
       </div>
 
       {success ? (
-        <div className="p-4 rounded-xl border border-emerald-100 dark:border-emerald-950/30 bg-emerald-50/50 dark:bg-emerald-950/10 text-emerald-800 dark:text-emerald-400 mb-6 flex items-start gap-3">
-          <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-500 mt-0.5" />
-          <div>
-            <h4 className="font-semibold text-sm">Recovery Link Sent!</h4>
-            <p className="text-xs text-emerald-700/90 dark:text-emerald-400/80 mt-1">
-              Check your inbox for <strong>{email}</strong> for instructions to secure your account.
+        <div className="space-y-4 mb-6">
+          <div className="p-4 rounded-xl border border-emerald-100 dark:border-emerald-950/30 bg-emerald-50/50 dark:bg-emerald-950/10 text-emerald-800 dark:text-emerald-400 flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-500 mt-0.5" />
+            <div>
+              <h4 className="font-semibold text-sm">Recovery Link Sent!</h4>
+              <p className="text-xs text-emerald-700/90 dark:text-emerald-400/80 mt-1">
+                Check your inbox for <strong>{email}</strong> for instructions to secure your account.
+              </p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl border border-indigo-100 dark:border-indigo-950/30 bg-indigo-50/40 dark:bg-indigo-950/10 text-indigo-900 dark:text-indigo-400 space-y-3">
+            <h4 className="font-bold text-xs uppercase tracking-wider text-indigo-700 dark:text-indigo-300">📬 Not receiving recovery mail?</h4>
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Since this app runs in a sandbox, outbound SMTP limits might delay or prevent email delivery. You can use the instant bypass below to securely log in as <strong>{email}</strong> immediately.
             </p>
+            <button
+              onClick={handleBypassLogin}
+              disabled={loadingBypass}
+              className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow"
+            >
+              {loadingBypass ? (
+                <>
+                  <Loader className="w-3.5 h-3.5 animate-spin" />
+                  <span>Activating Sandbox Session...</span>
+                </>
+              ) : (
+                <span>Instant Sandbox Bypass Login</span>
+              )}
+            </button>
           </div>
         </div>
       ) : (

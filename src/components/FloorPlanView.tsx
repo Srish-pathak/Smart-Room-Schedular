@@ -1,17 +1,11 @@
-import React, { useState, useMemo } from 'react';
-import { Room, Booking } from '../types';
+import { useState, useMemo } from 'react';
+import { Room } from '../types';
 import { 
-  Users, 
-  CheckCircle, 
   Clock, 
   Sparkles, 
-  Calendar, 
-  CalendarPlus, 
   Info, 
   MapPin, 
-  Loader2, 
   QrCode,
-  Check,
   AlertTriangle
 } from 'lucide-react';
 
@@ -159,6 +153,68 @@ export function FloorPlanView({
   // Handle room inspection selection
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 
+  // Tooltip hover states
+  const [hoveredRoom, setHoveredRoom] = useState<Room | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [leaveTimeout, setLeaveTimeout] = useState<any>(null);
+
+  const handleMouseEnterRoom = (e: React.MouseEvent, room: Room) => {
+    if (leaveTimeout) {
+      clearTimeout(leaveTimeout);
+    }
+    const rect = e.currentTarget.closest('#floorplan-svg-wrapper')?.getBoundingClientRect();
+    if (rect) {
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      setTooltipPos({ x, y });
+    }
+    setHoveredRoom(room);
+    setTooltipVisible(true);
+  };
+
+  const handleMouseMoveRoom = (e: React.MouseEvent, room: Room) => {
+    const rect = e.currentTarget.closest('#floorplan-svg-wrapper')?.getBoundingClientRect();
+    if (rect) {
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      setTooltipPos({ x, y });
+    }
+  };
+
+  const handleMouseLeaveRoom = () => {
+    const timeout = setTimeout(() => {
+      setTooltipVisible(false);
+    }, 200);
+    setLeaveTimeout(timeout);
+  };
+
+  const handleMouseEnterTooltip = () => {
+    if (leaveTimeout) {
+      clearTimeout(leaveTimeout);
+    }
+    setTooltipVisible(true);
+  };
+
+  const handleMouseLeaveTooltip = () => {
+    setTooltipVisible(false);
+  };
+
+  const hoveredRoomActiveBooking = useMemo(() => {
+    if (!hoveredRoom) return null;
+    const now = new Date();
+    const roomBookings = adminBookings.filter(b => 
+      b.room_id === hoveredRoom.id || 
+      b.room_name?.toLowerCase().includes(hoveredRoom.name.toLowerCase()) ||
+      hoveredRoom.name?.toLowerCase().includes(b.room_name?.toLowerCase())
+    );
+    return roomBookings.find(b => {
+      const start = new Date(b.start_time);
+      const end = new Date(b.end_time);
+      return start <= now && end >= now;
+    });
+  }, [hoveredRoom, adminBookings]);
+
   // Find inspected room object
   const activeInspectedRoom = useMemo(() => {
     if (!selectedRoomId) {
@@ -258,7 +314,7 @@ export function FloorPlanView({
         </div>
 
         {/* SVG Drawing Canvas */}
-        <div className="relative border border-slate-800 rounded-2xl bg-slate-950 overflow-hidden shadow-inner p-2.5">
+        <div id="floorplan-svg-wrapper" className="relative border border-slate-800 rounded-2xl bg-slate-950 overflow-hidden shadow-inner p-2.5">
           <svg 
             viewBox="0 0 800 500" 
             className="w-full h-auto text-slate-300 drop-shadow-2xl select-none"
@@ -421,6 +477,9 @@ export function FloorPlanView({
                   key={room.id}
                   className="cursor-pointer transition-all duration-300 group"
                   onClick={() => setSelectedRoomId(room.id)}
+                  onMouseEnter={(e) => handleMouseEnterRoom(e, room)}
+                  onMouseMove={(e) => handleMouseMoveRoom(e, room)}
+                  onMouseLeave={handleMouseLeaveRoom}
                   opacity={isActiveInFilters ? 1 : 0.28}
                   style={{ transition: 'opacity 300ms, transform 300ms' }}
                 >
@@ -515,6 +574,67 @@ export function FloorPlanView({
           <div className="absolute bottom-2 left-2 bg-slate-950/90 border border-slate-800/80 rounded-lg py-1 px-2.5 text-[9px] font-mono text-slate-400 shadow-md">
             <span>🛠 CAD Grid Nodes: 7 core academic sectors mapped</span>
           </div>
+
+          {/* Interactive Hover Tooltip */}
+          {tooltipVisible && hoveredRoom && (
+            <div
+              onMouseEnter={handleMouseEnterTooltip}
+              onMouseLeave={handleMouseLeaveTooltip}
+              className="absolute bg-slate-950/95 border border-slate-800/80 backdrop-blur-md rounded-2xl shadow-2xl p-4 w-64 text-left z-50 pointer-events-auto space-y-3 transition-all duration-200"
+              style={{
+                left: `${tooltipPos.x > 540 ? tooltipPos.x - 270 : tooltipPos.x + 12}px`,
+                top: `${tooltipPos.y > 340 ? tooltipPos.y - 180 : tooltipPos.y + 12}px`,
+              }}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h4 className="text-xs font-black text-white leading-tight">{hoveredRoom.name}</h4>
+                  <p className="text-[9px] text-slate-500 font-mono mt-0.5">
+                    {FLOOR_PLAN_SLOTS.find(s => hoveredRoom.name.toLowerCase().includes(s.key))?.wing || 'Core Block'}
+                  </p>
+                </div>
+                <span className={`text-[8.5px] font-mono font-extrabold uppercase py-0.5 px-1.5 rounded-md border shrink-0 ${
+                  hoveredRoom.status === 'available' ? 'bg-emerald-950/80 border-emerald-500/30 text-emerald-400' :
+                  hoveredRoom.status === 'booked' ? 'bg-rose-950/80 border-rose-500/30 text-rose-450' :
+                  'bg-amber-950/80 border-amber-500/30 text-amber-400'
+                }`}>
+                  {hoveredRoom.status === 'available' ? 'Available' : 
+                   hoveredRoom.status === 'booked' ? 'Occupied' : 'Expiring'}
+                </span>
+              </div>
+
+              <div className="text-[10px] space-y-1.5 border-t border-b border-slate-850 py-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-mono">Capacity:</span>
+                  <span className="font-extrabold text-slate-300">{hoveredRoom.capacity} Seats</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 font-mono block mb-0.5">Current Status:</span>
+                  {hoveredRoomActiveBooking ? (
+                    <div className="bg-rose-950/20 border border-rose-950/50 rounded-lg p-1.5 text-[9.5px]">
+                      <span className="text-white font-extrabold block truncate">"{hoveredRoomActiveBooking.summary}"</span>
+                      <span className="text-slate-400 block truncate mt-0.5">By {hoveredRoomActiveBooking.creator_name?.split(' ')[0]}</span>
+                    </div>
+                  ) : (
+                    <span className="text-emerald-400 font-extrabold block">✓ Ready for instant booking</span>
+                  )}
+                </div>
+              </div>
+
+              {hoveredRoom.status === 'available' && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChooseSlot(hoveredRoom);
+                  }}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md transition-all flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3 text-indigo-300" />
+                  Quick Reserve
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Dynamic Warning if custom rooms overflow SVG sectors */}
@@ -567,7 +687,7 @@ export function FloorPlanView({
             <div className="space-y-4">
               <div className="relative h-44 rounded-2xl overflow-hidden border border-slate-850">
                 <img 
-                  src={activeInspectedRoom.image} 
+                  src={activeInspectedRoom.image || undefined} 
                   alt={activeInspectedRoom.name} 
                   className="w-full h-full object-cover" 
                 />

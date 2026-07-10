@@ -1,4 +1,3 @@
-import React from 'react';
 import { TrendingUp, Clock, Hourglass, Award, ShieldCheck } from 'lucide-react';
 import {
   AreaChart,

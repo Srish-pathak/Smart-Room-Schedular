@@ -46,7 +46,7 @@ export const RoomDetailsDrawer: React.FC<RoomDetailsDrawerProps> = ({
           {/* Cover Image Header */}
           <div className="relative h-56 shrink-0 bg-stone-100">
             <img 
-              src={selectedRoomForDetails.image} 
+              src={selectedRoomForDetails.image || undefined} 
               alt={selectedRoomForDetails.name} 
               className="w-full h-full object-cover" 
             />

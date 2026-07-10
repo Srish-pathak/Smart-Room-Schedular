@@ -1,15 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { motion } from 'motion/react';
+import { useState, useEffect, useMemo } from 'react';
 import { Room, Booking } from '../types';
 import { 
   ChevronLeft, 
   ChevronRight, 
   Clock, 
   MapPin, 
-  Users, 
-  Calendar, 
-  Plus,
-  Compass
+  Plus
 } from 'lucide-react';
 
 interface WeeklyCalendarGridProps {
@@ -22,13 +18,13 @@ interface WeeklyCalendarGridProps {
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 8:00 AM to 8:00 PM (12 hours span)
 
-export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
+export const WeeklyCalendarGrid = ({
   rooms = [],
   bookings = [],
   isDarkMode,
   onSlotClick,
   onEventClick
-}) => {
+}: WeeklyCalendarGridProps) => {
   const [baseDate, setBaseDate] = useState<Date>(new Date());
   const [selectedRoomFilter, setSelectedRoomFilter] = useState<string>('all');
   const [currentIndicatorTime, setCurrentIndicatorTime] = useState<Date>(new Date());

@@ -11,11 +11,9 @@ import {
   updateDoc, 
   deleteDoc, 
   query, 
-  where, 
-  orderBy, 
-  limit 
+  where 
 } from 'firebase/firestore';
-import { db, auth } from '../firebase/firebase';
+import { db } from '../firebase/firebase';
 
 let cachedToken: string | null = localStorage.getItem('iitbhu_smart_jwt_token') || sessionStorage.getItem('iitbhu_smart_jwt_token');
 
@@ -165,6 +163,7 @@ export const roomsAPI = {
     };
 
     await setDoc(doc(db, 'rooms', roomId), newRoom);
+    await auditAPI.log('ROOM_CREATE', `Created room "${newRoom.name}" in building "${newRoom.building}"`);
     return newRoom;
   },
 
@@ -185,6 +184,7 @@ export const roomsAPI = {
     };
 
     await setDoc(doc(db, 'rooms', id), updatedRoom, { merge: true });
+    await auditAPI.log('ROOM_UPDATE', `Updated room details for "${updatedRoom.name}"`);
     return updatedRoom;
   },
 
@@ -192,11 +192,13 @@ export const roomsAPI = {
     for (const room of rooms) {
       await this.create(room);
     }
+    await auditAPI.log('ROOM_BULK_CREATE', `Bulk-registered ${rooms.length} rooms`);
     return rooms;
   },
 
   async delete(id: string) {
     await deleteDoc(doc(db, 'rooms', id));
+    await auditAPI.log('ROOM_DELETE', `Deleted room ID "${id}"`);
     return { success: true };
   }
 };
@@ -345,6 +347,7 @@ export const bookingsAPI = {
     };
 
     await setDoc(doc(db, 'bookings', bookingId), newBooking);
+    await auditAPI.log('BOOK_CREATE', `Created booking ID "${bookingId}" for "${roomName}" (${summary})`);
 
     // Create a real-time notification in Firestore
     try {
@@ -412,6 +415,7 @@ export const bookingsAPI = {
     };
 
     await setDoc(doc(db, 'bookings', id), updatedBooking, { merge: true });
+    await auditAPI.log('BOOK_UPDATE', `Updated booking ID "${id}" for "${updatedBooking.roomName}"`);
     return { id, ...updatedBooking };
   },
 
@@ -441,6 +445,7 @@ export const bookingsAPI = {
     }
 
     await deleteDoc(docRef);
+    await auditAPI.log('BOOK_CANCEL', `Cancelled booking ID "${id}" for "${target.roomName || target.room_name}"`);
 
     // Dispatch cancellation notification
     try {
@@ -465,6 +470,7 @@ export const bookingsAPI = {
 
   async approve(id: string) {
     await setDoc(doc(db, 'bookings', id), { status: 'Approved' }, { merge: true });
+    await auditAPI.log('BOOK_APPROVE', `Approved reservation ID "${id}"`);
     return { success: true };
   },
 
@@ -474,6 +480,7 @@ export const bookingsAPI = {
       rejectionReason: reason,
       rejection_reason: reason
     }, { merge: true });
+    await auditAPI.log('BOOK_REJECT', `Rejected reservation ID "${id}" - Reason: "${reason}"`);
     return { success: true };
   }
 };
@@ -565,19 +572,63 @@ export const analyticsAPI = {
   }
 };
 
+export const auditAPI = {
+  async listLogs() {
+    try {
+      const snap = await getDocs(collection(db, 'audit_logs'));
+      const logs = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          action: data.action || 'Unknown Action',
+          details: data.details || '',
+          status: data.status || 'success',
+          timestamp: data.timestamp || new Date().toISOString()
+        };
+      });
+      // Sort chronologically (oldest first, since UI does .reverse())
+      logs.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      return logs;
+    } catch (e) {
+      console.warn('Failed to fetch audit logs:', e);
+      return [];
+    }
+  },
+
+  async log(action: string, details: string, status: 'success' | 'failure' = 'success') {
+    try {
+      const token = getSessionToken();
+      let email = 'system';
+      if (token) {
+        try {
+          const parsed = JSON.parse(atob(token));
+          email = parsed.email || 'unknown';
+        } catch {}
+      }
+      const id = 'log-' + Math.random().toString(36).substring(2, 9);
+      await setDoc(doc(db, 'audit_logs', id), {
+        action,
+        details: `${email}: ${details}`,
+        status,
+        timestamp: new Date().toISOString()
+      });
+    } catch (e) {
+      console.warn('Failed to write audit log:', e);
+    }
+  }
+};
+
 export const checkInAPI = {
   async checkIn(bookingId: string) {
     await setDoc(doc(db, 'bookings', bookingId), {
       checkedIn: true,
       checkInTime: new Date().toISOString()
     }, { merge: true });
+    
+    // Add real audit log
+    await auditAPI.log('QR_CHECKIN', `Checked in for booking ID ${bookingId}`);
+    
     return { success: true };
-  }
-};
-
-export const auditAPI = {
-  async listLogs() {
-    return []; // Audit log collection removed for simplification
   }
 };
 

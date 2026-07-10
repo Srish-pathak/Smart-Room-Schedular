@@ -1,5 +1,3 @@
-import React from 'react';
-import { motion } from 'motion/react';
 import { Room, Booking } from '../types';
 import { calculateRoomStatus } from '../utils/roomStatus';
 import { 
@@ -13,11 +11,7 @@ import {
   ArrowRight, 
   Plus, 
   TrendingUp, 
-  Building, 
-  AlertCircle, 
-  CheckCircle2, 
-  HelpCircle,
-  Undo
+  CheckCircle2
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -391,7 +385,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {recentlyAdded.map(room => (
                 <div key={room.id} className="flex items-center gap-3">
                   <img 
-                    src={room.image} 
+                    src={room.image || undefined} 
                     alt={room.name} 
                     className="w-12 h-12 rounded-xl object-cover border border-slate-700/30 shrink-0 bg-stone-100"
                   />

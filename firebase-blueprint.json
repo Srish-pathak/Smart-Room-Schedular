@@ -151,6 +151,62 @@
         }
       },
       "required": ["id", "title", "message", "type", "read", "created_at"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "A feedback or room maintenance issue reported by a faculty member.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique feedback ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "ID of the reporting faculty member"
+        },
+        "reporterName": {
+          "type": "string",
+          "description": "Name of the reporting faculty member"
+        },
+        "reporterEmail": {
+          "type": "string",
+          "description": "Email of the reporting faculty member"
+        },
+        "roomId": {
+          "type": "string",
+          "description": "ID of the affected room"
+        },
+        "roomName": {
+          "type": "string",
+          "description": "Name of the affected room"
+        },
+        "issueType": {
+          "type": "string",
+          "description": "Type of maintenance or hardware issue"
+        },
+        "title": {
+          "type": "string",
+          "description": "Short summary of the issue"
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed explanation of the issue"
+        },
+        "priority": {
+          "type": "string",
+          "description": "Urgency/Priority of the issue (low, medium, high, critical)"
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the report (pending, in_progress, resolved)"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp of report creation"
+        }
+      },
+      "required": ["id", "userId", "reporterName", "reporterEmail", "roomId", "roomName", "issueType", "title", "description", "priority", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -169,6 +225,10 @@
     "notifications": {
       "schema": "Notification",
       "description": "Collection of system alerts and activity notifications"
+    },
+    "feedback": {
+      "schema": "Feedback",
+      "description": "Collection of maintenance reports and issues submitted by faculty members"
     }
   }
 }

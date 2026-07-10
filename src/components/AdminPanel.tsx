@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   Plus, 
   Upload, 
@@ -7,7 +7,6 @@ import {
   Shield, 
   FileSpreadsheet, 
   Upload as UploadIcon, 
-  AlertTriangle,
   Check,
   X,
   Clock,
@@ -67,7 +66,7 @@ export function AdminPanel({
   const [parsedRooms, setParsedRooms] = useState<any[]>([]);
 
   // Calculate statistics for the dashboard
-  const occupancyStats = React.useMemo(() => {
+  const occupancyStats = useMemo(() => {
     const dailyMap: Record<string, number> = {};
     const roomMap: Record<string, number> = {};
     const dayOfWeekMap: Record<string, number> = {

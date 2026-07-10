@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from './useAuth';
-import { User, Mail, Lock, ShieldAlert, Eye, EyeOff, Loader, CheckCircle2, AlertCircle } from 'lucide-react';
+import { User, Mail, Lock, Eye, EyeOff, Loader, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface RegisterProps {
   onSwitchToLogin: () => void;

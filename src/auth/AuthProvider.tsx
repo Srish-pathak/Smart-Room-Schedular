@@ -1,8 +1,8 @@
-import React, { createContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useState, useEffect, ReactNode } from 'react';
 import { onAuthStateChanged, User as FirebaseUser, getRedirectResult, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/firebase';
-import { authService, UserProfile, isRunningInIframe } from '../services/authService';
+import { authService, UserProfile } from '../services/authService';
 import { setSessionToken } from '../lib/api';
 
 export interface AuthUser {
@@ -23,6 +23,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, fullName: string, role: 'student' | 'faculty' | 'admin') => Promise<any>;
   signIn: (email: string, password: string, rememberMe?: boolean) => Promise<any>;
   signInWithGoogle: () => Promise<any>;
+  signInWithSandboxBypass: (targetEmail: string) => Promise<any>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
@@ -58,7 +59,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const result = await getRedirectResult(auth);
         if (result && active) {
-          console.log('Successfully completed Google Redirect Authentication:', result.user.email);
+          console.info('Successfully completed Google Redirect Authentication:', result.user.email);
           const credential = GoogleAuthProvider.credentialFromResult(result);
           if (credential?.accessToken) {
             sessionStorage.setItem('google_workspace_access_token', credential.accessToken);
@@ -295,6 +296,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
     await authService.resetPassword(email);
   };
 
+  const signInWithSandboxBypass = async (targetEmail: string) => {
+    setLoading(true);
+    try {
+      const result = await authService.signInWithSandboxBypass(targetEmail);
+      setFirebaseUser(result.firebaseUser);
+      setUser({
+        uid: result.userProfile.uid,
+        fullName: result.userProfile.fullName,
+        email: result.userProfile.email,
+        role: result.userProfile.role,
+        profilePhoto: result.userProfile.profilePhoto || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(result.userProfile.fullName)}`,
+        isVerified: result.userProfile.isVerified
+      });
+      return result;
+    } catch (error) {
+      setLoading(false);
+      throw error;
+    }
+  };
+
   const sendVerificationEmail = async () => {
     await authService.sendEmailVerification();
   };
@@ -328,6 +349,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     signUp,
     signIn,
     signInWithGoogle,
+    signInWithSandboxBypass,
     logout,
     resetPassword,
     sendVerificationEmail,
