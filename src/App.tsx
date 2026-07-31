@@ -8,7 +8,6 @@ import {
   bookingsAPI,
   adminAPI,
   notificationsAPI,
-  checkInAPI,
   auditAPI,
   setSessionToken,
   getSessionToken
@@ -19,8 +18,6 @@ import { db } from './firebase/firebase';
 // Components
 import { CalendarAPI } from './lib/workspace';
 import CalendarWidget from './components/CalendarWidget';
-import QRCodeSVG from './components/QRCodeSVG';
-import QRScannerModal from './components/QRScannerModal';
 import { LoginView } from './components/LoginView';
 import { ConfirmModal } from './components/ConfirmModal';
 import { ActivityHistoryDrawer } from './components/ActivityHistoryDrawer';
@@ -29,6 +26,13 @@ import { AdminPanel } from './components/AdminPanel';
 import { DashboardView } from './components/DashboardView';
 import { UserProfileView } from './components/UserProfileView';
 import { RoomsDirectoryView } from './components/RoomsDirectoryView';
+import { LandingPage } from './components/LandingPage';
+import { DigitalDisplayView } from './components/DigitalDisplayView';
+import { SmartAIRoomAssistant } from './components/SmartAIRoomAssistant';
+import { ReportExportModal } from './components/ReportExportModal';
+import { NotificationFeed } from './components/NotificationFeed';
+import { OnboardingTour } from './components/OnboardingTour';
+import { HelpSupportModal } from './components/HelpSupportModal';
 import { calculateRoomStatus } from './utils/roomStatus';
 
 // Icons
@@ -56,6 +60,8 @@ import {
   Filter,
   Check,
   RotateCcw,
+  Building2,
+  Tv,
   Search,
   Download,
   ArrowUpDown,
@@ -69,7 +75,9 @@ import {
   Loader2,
   Menu,
   ChevronRight,
-  Phone
+  Phone,
+  HelpCircle,
+  Compass
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -242,7 +250,21 @@ export default function App() {
       return unique;
     });
   };
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'rooms' | 'calendar' | 'profile' | 'admin'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'landing' | 'dashboard' | 'rooms' | 'calendar' | 'profile' | 'admin' | 'kiosk'>('dashboard');
+  const [showAssistantModal, setShowAssistantModal] = useState<boolean>(false);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [showOnboardingTour, setShowOnboardingTour] = useState<boolean>(false);
+  const [showHelpModal, setShowHelpModal] = useState<boolean>(false);
+
+  // Auto-trigger Onboarding Tour for first-time users
+  useEffect(() => {
+    if (user && !needsAuth) {
+      const hasCompleted = localStorage.getItem('iitbhu_has_completed_tour');
+      if (hasCompleted !== 'true') {
+        setShowOnboardingTour(true);
+      }
+    }
+  }, [user, needsAuth]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [compareRooms, setCompareRooms] = useState<Room[]>([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -470,17 +492,12 @@ export default function App() {
   // Action feedback Toast state
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'info' | 'error' }[]>([]);
 
-  // Selected Room for Scannable QR Modal
-  const [selectedQRRoom, setSelectedQRRoom] = useState<Room | null>(null);
   const [selectedRoomForHistory, setSelectedRoomForHistory] = useState<Room | null>(null);
   const [selectedRoomForDetails, setSelectedRoomForDetails] = useState<Room | null>(null);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [historyPeriodFilter, setHistoryPeriodFilter] = useState<'all' | 'odd-25' | 'even-26' | 'summer-26' | 'ay-26-27' | 'custom'>('all');
   const [historyStartDate, setHistoryStartDate] = useState('');
   const [historyEndDate, setHistoryEndDate] = useState('');
-  const [isScanningSimulated, setIsScanningSimulated] = useState(false);
-  const [scanComplete, setScanComplete] = useState(false);
-  const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
 
   // Admin section lists
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
@@ -763,32 +780,7 @@ export default function App() {
 
 
 
-  const triggerFastCheckIn = async (room: Room) => {
-    // Find an ongoing/upcoming booking for this user in this room
-    const matchingBooking = adminBookings.find((b: any) => {
-      if (b.room_id !== room.id) return false;
-      const start = new Date(b.start_time);
-      const end = new Date(b.end_time);
-      const now = new Date();
-      const allowedStart = new Date(start.getTime() - 30 * 60 * 1000);
-      return now >= allowedStart && now <= end;
-    });
 
-    if (!matchingBooking) {
-      addToast(`No active or upcoming reservation found for "${room.name}" within the check-in window (starts 30 mins before start).`, 'error');
-      return;
-    }
-
-    try {
-      await checkInAPI.checkIn(matchingBooking.id);
-      addToast(`⚡ Successfully checked in to room "${room.name}"!`, 'success');
-      if (user && user.role) {
-        fetchDashboardModels(user.role);
-      }
-    } catch (err: any) {
-      addToast(err.message || 'Check-in failed.', 'error');
-    }
-  };
 
   // ==========================================
   // FILTERS AND SEARCH
@@ -1154,6 +1146,34 @@ export default function App() {
 
             {/* Right Side Controls & Profile Dropdown */}
             <div className="hidden lg:flex items-center gap-3">
+              {/* Help & Support Knowledgebase Button */}
+              <button
+                onClick={() => setShowHelpModal(true)}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 ${
+                  isDarkMode 
+                    ? 'bg-slate-900 border-slate-800 text-indigo-400 hover:text-white hover:bg-slate-800' 
+                    : 'bg-[#faf8f2] border-[#ead29c]/40 text-indigo-700 hover:text-indigo-900 hover:bg-stone-100'
+                }`}
+                title="Help & FAQs"
+              >
+                <HelpCircle className="w-4 h-4" />
+                <span className="text-xs font-bold hidden xl:inline">Help & FAQs</span>
+              </button>
+
+              {/* Guided Onboarding Tour Button */}
+              <button
+                onClick={() => setShowOnboardingTour(true)}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 ${
+                  isDarkMode 
+                    ? 'bg-slate-900 border-slate-800 text-purple-400 hover:text-white hover:bg-slate-800' 
+                    : 'bg-[#faf8f2] border-[#ead29c]/40 text-purple-700 hover:text-purple-900 hover:bg-stone-100'
+                }`}
+                title="Guided Onboarding Tour"
+              >
+                <Compass className="w-4 h-4" />
+                <span className="text-xs font-bold hidden xl:inline">Guided Tour</span>
+              </button>
+
               {/* Premium Dark Mode Toggle */}
               <button
                 onClick={toggleDarkMode}
@@ -1619,6 +1639,18 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <button
+                    onClick={() => setActiveTab('landing')}
+                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                      activeTab === 'landing'
+                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Building2 className="w-4 h-4 shrink-0 text-indigo-400" />
+                    <span>Landing Page</span>
+                  </button>
+
+                  <button
                     onClick={() => setActiveTab('dashboard')}
                     className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
                       activeTab === 'dashboard'
@@ -1655,6 +1687,34 @@ export default function App() {
                   </button>
 
                   <button
+                    onClick={() => setShowAssistantModal(true)}
+                    className="w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer text-purple-400 hover:bg-purple-950/20"
+                  >
+                    <Sparkles className="w-4 h-4 shrink-0 text-purple-400" />
+                    <span>AI Room Allocator</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('kiosk')}
+                    className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
+                      activeTab === 'kiosk'
+                        ? (isDarkMode ? 'bg-indigo-950/50 text-indigo-300 border-l-4 border-indigo-500 font-bold' : 'bg-indigo-50/80 text-indigo-700 border-l-4 border-indigo-500 font-bold')
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Tv className="w-4 h-4 shrink-0 text-emerald-400" />
+                    <span>Digital Door Plaque</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowExportModal(true)}
+                    className="w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer text-indigo-400 hover:bg-indigo-950/20"
+                  >
+                    <Download className="w-4 h-4 shrink-0 text-indigo-400" />
+                    <span>Export Reports</span>
+                  </button>
+
+                  <button
                     onClick={() => setActiveTab('profile')}
                     className={`w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer ${
                       activeTab === 'profile'
@@ -1664,6 +1724,22 @@ export default function App() {
                   >
                     <User className="w-4 h-4 shrink-0" />
                     <span>My Profile</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowHelpModal(true)}
+                    className="w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer text-indigo-400 hover:bg-indigo-950/20"
+                  >
+                    <HelpCircle className="w-4 h-4 shrink-0 text-indigo-400" />
+                    <span>Help & FAQs</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowOnboardingTour(true)}
+                    className="w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer text-purple-400 hover:bg-purple-950/20"
+                  >
+                    <Compass className="w-4 h-4 shrink-0 text-purple-400" />
+                    <span>Guided Tour</span>
                   </button>
 
                   {user?.role === 'admin' && (
@@ -1762,6 +1838,37 @@ export default function App() {
                 className="w-full"
               >
               {/* ==========================================
+                  TAB: LANDING PAGE
+                  ========================================== */}
+              {activeTab === 'landing' && (
+                <LandingPage
+                  rooms={rooms}
+                  onEnterApp={() => setActiveTab('dashboard')}
+                  onOpenLogin={() => setActiveTab('dashboard')}
+                  isDarkMode={isDarkMode}
+                  onToggleDarkMode={toggleDarkMode}
+                />
+              )}
+
+              {/* ==========================================
+                  TAB: DIGITAL DOOR PLAQUE KIOSK
+                  ========================================== */}
+              {activeTab === 'kiosk' && (
+                <DigitalDisplayView
+                  rooms={rooms}
+                  bookings={adminBookings}
+                  onQuickBook15Min={(room) => {
+                    setConfirmRoomSelection(room);
+                    setPreselectedRoomId(room.id);
+                    setActiveTab('calendar');
+                    addToast(`Quick reservation initiated for ${room.name}`, 'info');
+                  }}
+                  isDarkMode={isDarkMode}
+                  onCloseKiosk={() => setActiveTab('dashboard')}
+                />
+              )}
+
+              {/* ==========================================
                   TAB: CAMPUS DASHBOARD
                   ========================================== */}
               {activeTab === 'dashboard' && (
@@ -1808,14 +1915,11 @@ export default function App() {
                   loadingResources={loadingResources}
                   addToast={addToast}
                   fetchDashboardModels={fetchDashboardModels}
-                  setIsQRScannerOpen={setIsQRScannerOpen}
                   setActiveTab={setActiveTab}
                   syncRoomsStatusFromCalendar={syncRoomsStatusFromCalendar}
                   handleDownloadCSV={handleDownloadCSV}
                   setConfirmModal={setConfirmModal}
                   setSelectedRoomForHistory={setSelectedRoomForHistory}
-                  setSelectedQRRoom={setSelectedQRRoom}
-                  setScanComplete={setScanComplete}
                   setSelectedRoomForDetails={setSelectedRoomForDetails}
                   setConfirmRoomSelection={setConfirmRoomSelection}
                   setPreselectedRoomId={setPreselectedRoomId}
@@ -1903,78 +2007,7 @@ export default function App() {
         </AnimatePresence>
       </div>
 
-      {/* MODAL: QR Sensor Simulator Overlay */}
-      <AnimatePresence>
-        {selectedQRRoom && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-6 text-center"
-            >
-              <div className="space-y-1.5">
-                <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest font-mono">QR PLAQUE SENSOR DECODER</span>
-                <h3 className="text-lg font-black text-white">{selectedQRRoom.name}</h3>
-                <p className="text-slate-400 text-[11px]">Hold your mobile device up to the academic doorway QR matrix.</p>
-              </div>
 
-              <div className="flex justify-center p-4 bg-white rounded-2xl max-w-[200px] mx-auto border border-slate-250 shadow-inner">
-                {/* SVG matrix template */}
-                <QRCodeSVG value={`https://room-booking.iitbhu.ac.in/check-in/${selectedQRRoom.id}`} />
-              </div>
-
-              {!isScanningSimulated ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsScanningSimulated(true);
-                    setTimeout(() => {
-                      setIsScanningSimulated(false);
-                      setScanComplete(true);
-                      triggerFastCheckIn(selectedQRRoom);
-                      setTimeout(() => {
-                        setSelectedQRRoom(null);
-                      }, 2000);
-                    }, 1800);
-                  }}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl text-xs uppercase"
-                >
-                  SIMULATE MOBILE CAMERA SCAN
-                </button>
-              ) : (
-                <div className="space-y-2 py-2">
-                  <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
-                  <span className="text-xs text-slate-400 font-mono">Decoding sensory trace index...</span>
-                </div>
-              )}
-
-              {scanComplete && (
-                <div className="text-indigo-400 text-xs font-mono py-1 font-bold">
-                  ✓ check-in sensor processed. Dashboard updated!
-                </div>
-              )}
-
-              <div className="pt-2">
-                <button
-                  onClick={() => setSelectedQRRoom(null)}
-                  className="text-xs text-slate-500 hover:text-white"
-                >
-                  Cancel Scanner
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* MODAL: Full Real-time QR Code Scanner */}
-      <QRScannerModal
-        isOpen={isQRScannerOpen}
-        onClose={() => setIsQRScannerOpen(false)}
-        rooms={rooms}
-        onCheckInSuccess={triggerFastCheckIn}
-      />
 
       {/* CONFIRMATION SLOT SELECTION DIALOG */}
       <AnimatePresence>
@@ -2054,6 +2087,53 @@ export default function App() {
           setSelectedRoomForHistory(room);
           setSelectedRoomForDetails(null);
         }}
+      />
+
+      {/* AI ROOM ALLOCATOR MODAL OVERLAY */}
+      {showAssistantModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <SmartAIRoomAssistant
+            rooms={rooms}
+            onSelectRecommendedRoom={(room) => {
+              setShowAssistantModal(false);
+              setConfirmRoomSelection(room);
+              setPreselectedRoomId(room.id);
+              setActiveTab('calendar');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onClose={() => setShowAssistantModal(false)}
+            isDarkMode={isDarkMode}
+          />
+        </div>
+      )}
+
+      {/* REPORT EXPORT MODAL OVERLAY */}
+      {showExportModal && (
+        <ReportExportModal
+          bookings={adminBookings}
+          rooms={rooms}
+          onClose={() => setShowExportModal(false)}
+          isDarkMode={isDarkMode}
+        />
+      )}
+
+      {/* INTERACTIVE ONBOARDING GUIDED TOUR */}
+      <OnboardingTour
+        isOpen={showOnboardingTour}
+        onClose={() => setShowOnboardingTour(false)}
+        onNavigateTab={(tab) => {
+          setActiveTab(tab);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        isDarkMode={isDarkMode}
+      />
+
+      {/* HELP & SUPPORT KNOWLEDGEBASE MODAL */}
+      <HelpSupportModal
+        isOpen={showHelpModal}
+        onClose={() => setShowHelpModal(false)}
+        onRestartTour={() => setShowOnboardingTour(true)}
+        isDarkMode={isDarkMode}
       />
 
       {/* Footer Branding */}

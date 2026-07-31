@@ -28,6 +28,7 @@ import {
   Wind,
   BookOpen,
   Accessibility,
+  AlertTriangle,
   Grid,
   Map
 } from 'lucide-react';
@@ -39,14 +40,11 @@ interface RoomsDirectoryViewProps {
   loadingResources: boolean;
   addToast: (message: string, type: 'success' | 'error' | 'info' | 'warn') => void;
   fetchDashboardModels: (role: string) => void;
-  setIsQRScannerOpen: (open: boolean) => void;
   setActiveTab: (tab: any) => void;
   syncRoomsStatusFromCalendar: () => void;
   handleDownloadCSV: () => void;
   setConfirmModal: (modal: any) => void;
   setSelectedRoomForHistory: (room: Room) => void;
-  setSelectedQRRoom: (room: Room) => void;
-  setScanComplete: (complete: boolean) => void;
   setSelectedRoomForDetails: (room: Room) => void;
   setConfirmRoomSelection: (room: Room) => void;
   setPreselectedRoomId: (id: string | null) => void;
@@ -69,14 +67,11 @@ export function RoomsDirectoryView({
   loadingResources,
   addToast,
   fetchDashboardModels,
-  setIsQRScannerOpen,
   setActiveTab,
   syncRoomsStatusFromCalendar,
   handleDownloadCSV,
   setConfirmModal,
   setSelectedRoomForHistory,
-  setSelectedQRRoom,
-  setScanComplete,
   setSelectedRoomForDetails,
   setConfirmRoomSelection,
   setPreselectedRoomId,
@@ -97,15 +92,33 @@ export function RoomsDirectoryView({
   const [minCapacity, setMinCapacity] = useState<number>(0);
   const [statusFilter, setStatusFilter] = useState<'all' | 'available'>('all');
   const [selectedBuilding, setSelectedBuilding] = useState<string>('all');
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedFeatureToggles, setSelectedFeatureToggles] = useState<string[]>([]);
 
-  // Derived building options
+  // Derived options
   const uniqueBuildings = useMemo(() => {
     const buildingsSet = new Set<string>();
     rooms.forEach((room) => {
       if (room.building) buildingsSet.add(room.building);
     });
     return Array.from(buildingsSet);
+  }, [rooms]);
+
+  const uniqueDepartments = useMemo(() => {
+    const deptSet = new Set<string>();
+    rooms.forEach((room) => {
+      if (room.contactDepartment) deptSet.add(room.contactDepartment);
+    });
+    return Array.from(deptSet);
+  }, [rooms]);
+
+  const uniqueCategories = useMemo(() => {
+    const catSet = new Set<string>();
+    rooms.forEach((room) => {
+      if (room.category) catSet.add(room.category);
+    });
+    return Array.from(catSet);
   }, [rooms]);
 
   // Derived user bookings
@@ -269,6 +282,8 @@ export function RoomsDirectoryView({
       if (room.capacity < minCapacity) return false;
       if (statusFilter === 'available' && room.status !== 'available') return false;
       if (selectedBuilding !== 'all' && room.building !== selectedBuilding) return false;
+      if (selectedDepartment !== 'all' && room.contactDepartment !== selectedDepartment) return false;
+      if (selectedCategory !== 'all' && room.category !== selectedCategory) return false;
       for (const f of selectedFeatureToggles) {
         if (!matchesFeature(room, f)) return false;
       }
@@ -276,12 +291,13 @@ export function RoomsDirectoryView({
         const query = searchQuery.toLowerCase().trim();
         const matchesName = room.name.toLowerCase().includes(query);
         const matchesBuilding = room.building?.toLowerCase().includes(query) || false;
+        const matchesDepartment = room.contactDepartment?.toLowerCase().includes(query) || false;
         const matchesCategory = room.category?.toLowerCase().includes(query) || false;
         const matchesBestFor = room.bestFor?.toLowerCase().includes(query) || false;
         const matchesFeatureDescription = room.features.some((feature) =>
           feature.toLowerCase().includes(query)
         );
-        if (!matchesName && !matchesBuilding && !matchesCategory && !matchesBestFor && !matchesFeatureDescription) return false;
+        if (!matchesName && !matchesBuilding && !matchesDepartment && !matchesCategory && !matchesBestFor && !matchesFeatureDescription) return false;
       }
       return true;
     });
@@ -314,17 +330,10 @@ export function RoomsDirectoryView({
             <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono">IIT BHU Campus Scheduler 👋</span>
             <h2 className="text-xl font-extrabold tracking-tight text-white">Need to book an academic space today?</h2>
             <p className="text-xs text-slate-350 max-w-2xl leading-relaxed">
-              Welcome, <strong className="text-indigo-300">{user?.name || user?.email || 'User'}</strong>. Browse live room statuses below. Click <strong className="text-indigo-300">"CHOOSE SLOT"</strong> to customize a schedule inside our interactive calendar, or click <button onClick={() => setIsQRScannerOpen(true)} className="text-indigo-300 font-extrabold hover:underline cursor-pointer bg-transparent border-none p-0 inline font-mono">"QR Scanner"</button> to check in instantly!
+              Welcome, <strong className="text-indigo-300">{user?.name || user?.email || 'User'}</strong>. Browse live room statuses below. Click <strong className="text-indigo-300">"CHOOSE SLOT"</strong> to customize a schedule inside our interactive calendar, or click <strong className="text-indigo-300">"Quick Book"</strong> to reserve now!
             </p>
           </div>
           <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-            <button
-              onClick={() => setIsQRScannerOpen(true)}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-550 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
-            >
-              <Scan className="w-4 h-4" />
-              <span>QR Scanner</span>
-            </button>
             <button
               onClick={() => setActiveTab('calendar')}
               className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-550 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
@@ -768,12 +777,14 @@ export function RoomsDirectoryView({
                 <SlidersHorizontal className="w-4 h-4 text-indigo-400" />
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-200">Refining Filters</span>
               </div>
-              {(minCapacity > 0 || statusFilter !== 'all' || selectedFeatureToggles.length > 0 || searchQuery.trim() !== '' || sortKey !== 'default' || selectedBuilding !== 'all') && (
+              {(minCapacity > 0 || statusFilter !== 'all' || selectedFeatureToggles.length > 0 || searchQuery.trim() !== '' || sortKey !== 'default' || selectedBuilding !== 'all' || selectedDepartment !== 'all' || selectedCategory !== 'all') && (
                 <button
                   onClick={() => {
                     setMinCapacity(0);
                     setStatusFilter('all');
                     setSelectedBuilding('all');
+                    setSelectedDepartment('all');
+                    setSelectedCategory('all');
                     setSelectedFeatureToggles([]);
                     setSearchQuery('');
                     setSortKey('default');
@@ -786,21 +797,21 @@ export function RoomsDirectoryView({
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-5 pt-2 text-left">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 pt-2 text-left">
               <div className="space-y-2">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Minimum Capacity Seats</span>
-                <div className="flex flex-wrap gap-1.5">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Minimum Seats</span>
+                <div className="flex flex-wrap gap-1">
                   {[0, 15, 30, 50, 100].map((cap) => {
                     const active = minCapacity === cap;
                     return (
                       <button
                         key={cap}
                         onClick={() => setMinCapacity(cap)}
-                        className={`text-[10px] font-extrabold py-1 px-2.5 rounded-lg border transition-all cursor-pointer ${
+                        className={`text-[10px] font-extrabold py-1 px-2 rounded-lg border transition-all cursor-pointer ${
                           active ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'
                         }`}
                       >
-                        {cap === 0 ? 'Any Seats' : `${cap}+ Seats`}
+                        {cap === 0 ? 'Any' : `${cap}+`}
                       </button>
                     );
                   })}
@@ -808,11 +819,11 @@ export function RoomsDirectoryView({
               </div>
 
               <div className="space-y-2">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Room Status Availability</span>
-                <div className="flex flex-wrap gap-1.5">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Availability</span>
+                <div className="flex flex-wrap gap-1">
                   {[
-                    { value: 'all', label: 'Include Booked' },
-                    { value: 'available', label: 'Only Available' }
+                    { value: 'all', label: 'All Slots' },
+                    { value: 'available', label: 'Available' }
                   ].map((option) => {
                     const active = statusFilter === option.value;
                     return (
@@ -831,25 +842,51 @@ export function RoomsDirectoryView({
               </div>
 
               <div className="space-y-2">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Building Campus Zone</span>
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Building / Zone</span>
                 <select
                   value={selectedBuilding}
                   onChange={(e) => setSelectedBuilding(e.target.value)}
-                  className="text-[11px] font-bold w-full py-2 px-3 rounded-lg border transition-all bg-slate-950 border-slate-800 text-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                  className="text-[11px] font-bold w-full py-2 px-2.5 rounded-lg border transition-all bg-slate-950 border-slate-800 text-slate-300 focus:border-indigo-500 outline-none"
                 >
-                  <option value="all">All Academic Buildings</option>
+                  <option value="all">All Buildings</option>
                   {uniqueBuildings.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
+                    <option key={b} value={b}>{b}</option>
                   ))}
                 </select>
               </div>
 
               <div className="space-y-2">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Amenities & Features</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {['Projector', 'Whiteboard', 'Display/Screen', 'Audio/Video', 'Ergonomics/Seating'].map((feat) => {
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Department / Unit</span>
+                <select
+                  value={selectedDepartment}
+                  onChange={(e) => setSelectedDepartment(e.target.value)}
+                  className="text-[11px] font-bold w-full py-2 px-2.5 rounded-lg border transition-all bg-slate-950 border-slate-800 text-slate-300 focus:border-indigo-500 outline-none"
+                >
+                  <option value="all">All Departments</option>
+                  {uniqueDepartments.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Room Type</span>
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="text-[11px] font-bold w-full py-2 px-2.5 rounded-lg border transition-all bg-slate-950 border-slate-800 text-slate-300 focus:border-indigo-500 outline-none"
+                >
+                  <option value="all">All Room Types</option>
+                  {uniqueCategories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block font-mono">Amenities</span>
+                <div className="flex flex-wrap gap-1">
+                  {['Projector', 'Whiteboard', 'Display/Screen', 'Audio/Video'].map((feat) => {
                     const isSelected = selectedFeatureToggles.includes(feat);
                     return (
                       <button
@@ -859,11 +896,11 @@ export function RoomsDirectoryView({
                             isSelected ? prev.filter(t => t !== feat) : [...prev, feat]
                           );
                         }}
-                        className={`text-[10.5px] font-semibold py-1 px-2.5 rounded-lg border transition-all flex items-center gap-1 cursor-pointer ${
+                        className={`text-[9.5px] font-semibold py-1 px-2 rounded-lg border transition-all flex items-center gap-1 cursor-pointer ${
                           isSelected ? 'bg-indigo-950 text-indigo-300 border-indigo-800' : 'bg-slate-950 border-slate-850 text-slate-500 hover:text-slate-350'
                         }`}
                       >
-                        {isSelected && <Check className="w-3 h-3 text-indigo-400" />}
+                        {isSelected && <Check className="w-2.5 h-2.5 text-indigo-400" />}
                         {feat}
                       </button>
                     );
@@ -938,11 +975,26 @@ export function RoomsDirectoryView({
             ))
           ) : filteredRooms.length === 0 ? (
             <div className="col-span-1 md:col-span-2 py-16 text-center bg-slate-900 border border-slate-800 rounded-3xl p-8">
-              <SlidersHorizontal className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-              <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider">No matching rooms found</h3>
-              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                We couldn't find any rooms that match your active criteria. Try clearing some filters or searching for another keyphrase.
+              <SlidersHorizontal className="w-12 h-12 text-teal-500 mx-auto mb-4" />
+              <h3 className="text-base font-bold text-slate-200">
+                {selectedDepartment !== 'all' 
+                  ? `No verified public rooms for ${selectedDepartment}`
+                  : 'No matching rooms found'}
+              </h3>
+              <p className="text-xs text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
+                {selectedDepartment !== 'all'
+                  ? `There is no publicly available room data published for this department on official IIT (BHU) portals. Administrators can add room details via the Admin Panel.`
+                  : `We couldn't find any rooms that match your active criteria. Try clearing filters or searching for another room name.`}
               </p>
+              {selectedDepartment !== 'all' && (
+                <button
+                  onClick={() => setActiveTab('admin')}
+                  className="mt-4 px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <Building2 className="w-4 h-4" />
+                  <span>Go to Admin Panel to Add Room</span>
+                </button>
+              )}
             </div>
           ) : (
             filteredRooms.map((room) => {
@@ -965,7 +1017,7 @@ export function RoomsDirectoryView({
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
 
-                      <div className="absolute top-4 left-4">
+                      <div className="absolute top-4 left-4 flex flex-col gap-1.5 items-start">
                         <span className={`text-[10px] font-extrabold uppercase py-1.5 px-3 rounded-xl font-mono border flex items-center gap-1.5 shadow-md ${
                           liveStatus.status === 'available'
                             ? 'bg-emerald-50 text-emerald-800 border-emerald-200/60'
@@ -978,6 +1030,18 @@ export function RoomsDirectoryView({
                           }`} />
                           {liveStatus.status === 'available' ? 'AVAILABLE' : liveStatus.status === 'reserved_soon' ? 'RESERVED SOON' : 'OCCUPIED'}
                         </span>
+
+                        {room.isVerified ? (
+                          <span className="bg-teal-900/90 text-teal-100 border border-teal-500/40 text-[9px] font-bold py-1 px-2.5 rounded-lg shadow backdrop-blur-md flex items-center gap-1" title={room.verificationSource || 'Verified from official IIT (BHU) public sources'}>
+                            <Check className="w-3 h-3 text-teal-300" />
+                            <span>Publicly Verified IIT (BHU)</span>
+                          </span>
+                        ) : (
+                          <span className="bg-amber-900/90 text-amber-100 border border-amber-500/40 text-[9px] font-bold py-1 px-2.5 rounded-lg shadow backdrop-blur-md flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-amber-300" />
+                            <span>Unverified Details</span>
+                          </span>
+                        )}
                       </div>
 
                       <div className="absolute top-4 right-4">
@@ -989,18 +1053,25 @@ export function RoomsDirectoryView({
                       </div>
 
                       <div className="absolute bottom-4 left-4 right-4 text-left">
-                        {room.category && (
-                          <span className="bg-[#dfb965] text-[#0a4735] text-[9.5px] font-extrabold uppercase py-0.5 px-2 rounded-lg border border-[#ead29c]/50 mb-1.5 inline-block tracking-wider font-mono">
-                            {room.category}
-                          </span>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                          {(room.contactDepartment || room.department) && (
+                            <span className="bg-teal-950 text-teal-200 text-[9px] font-extrabold uppercase py-0.5 px-2 rounded-md border border-teal-800/60 tracking-wider font-mono">
+                              {room.contactDepartment || room.department}
+                            </span>
+                          )}
+                          {room.category && (
+                            <span className="bg-[#dfb965] text-[#0a4735] text-[9px] font-extrabold uppercase py-0.5 px-2 rounded-md border border-[#ead29c]/50 tracking-wider font-mono">
+                              {room.category}
+                            </span>
+                          )}
+                        </div>
                         <h3 className="text-xl font-display font-extrabold text-white leading-tight drop-shadow-lg">
                           {room.name}
                         </h3>
                         <div className="flex flex-wrap items-center gap-x-3 mt-1.5 text-xs text-stone-200 font-sans">
                           <span className="flex items-center gap-1">
                             <Users className="w-3.5 h-3.5 text-[#dfb965]" />
-                            <strong>{room.capacity}</strong> standard capacity
+                            <strong>{room.capacity > 0 ? room.capacity : 'N/A'}</strong> standard capacity
                           </span>
                           {room.building && (
                             <span className="flex items-center gap-1 border-l border-white/20 pl-3">
@@ -1017,6 +1088,20 @@ export function RoomsDirectoryView({
                     </div>
 
                     <div className="p-6 space-y-4">
+                      {/* Missing Info Warning Notice */}
+                      {room.missingInfo && room.missingInfo.length > 0 && (
+                        <div className="p-2.5 bg-amber-50 border border-amber-200/80 rounded-xl text-left flex items-start gap-2 text-xs text-amber-900">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-[10.5px] uppercase tracking-wider block text-amber-800 font-mono">
+                              Missing Public Info: {room.missingInfo.join(', ')}
+                            </span>
+                            <span className="text-[10px] text-amber-700 block mt-0.5">
+                              This field is not explicitly detailed in public departmental documentation. Admin can update it in Admin Panel.
+                            </span>
+                          </div>
+                        </div>
+                      )}
                       {room.bestFor && (
                         <div className="space-y-1 text-xs text-left">
                           <span className="block text-[9px] font-bold text-[#c09728] uppercase tracking-widest font-mono">Best suited for</span>
@@ -1120,18 +1205,7 @@ export function RoomsDirectoryView({
                     </div>
                   </div>
 
-                  <div className="p-5 pt-4 border-t border-[#ead29c]/25 flex items-center justify-between gap-2.5 bg-[#faf8f2]/30 shrink-0">
-                    <button
-                      onClick={() => {
-                        setSelectedQRRoom(room);
-                        setScanComplete(false);
-                      }}
-                      className="px-3.5 py-2.5 bg-white hover:bg-[#faf8f2] border border-[#ead29c]/60 hover:border-[#dfb965] text-[#0a4735] rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all shadow-sm cursor-pointer"
-                      title="Generate dynamic QR Access Code"
-                    >
-                      QR Access
-                    </button>
-
+                  <div className="p-5 pt-4 border-t border-[#ead29c]/25 flex items-center justify-end gap-2.5 bg-[#faf8f2]/30 shrink-0">
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => setSelectedRoomForDetails(room)}
@@ -1180,10 +1254,6 @@ export function RoomsDirectoryView({
             setPreselectedRoomId(room.id);
           }}
           onViewHistory={(room) => setSelectedRoomForHistory(room)}
-          onShowQR={(room) => {
-            setSelectedQRRoom(room);
-            setScanComplete(false);
-          }}
         />
       )}
     </div>

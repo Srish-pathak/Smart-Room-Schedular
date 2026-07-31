@@ -10,10 +10,12 @@ import {
   Check,
   X,
   Clock,
-  ShieldAlert
+  ShieldAlert,
+  Edit2
 } from 'lucide-react';
 import { Room, Booking, User } from '../types';
-import { roomsAPI, adminAPI, bookingsAPI, auditAPI } from '../lib/api';
+import { roomsAPI, adminAPI, bookingsAPI, auditAPI, defaultIITBHURooms } from '../lib/api';
+import { ALL_IITBHU_DEPARTMENTS } from '../firebase/seedRooms';
 import { CalendarAPI } from '../lib/workspace';
 import { DashboardStats } from './DashboardStats';
 
@@ -53,11 +55,85 @@ export function AdminPanel({
 
   // Single Room creation form state
   const [adminRoomName, setAdminRoomName] = useState('');
-  const [adminRoomCapacity, setAdminRoomCapacity] = useState<number>(30);
+  const [adminRoomBuilding, setAdminRoomBuilding] = useState('Department Building');
+  const [adminRoomFloor, setAdminRoomFloor] = useState('Ground Floor');
+  const [adminRoomDepartment, setAdminRoomDepartment] = useState('Computer Science & Engineering');
+  const [adminRoomType, setAdminRoomType] = useState('Conference Room');
+  const [adminRoomCapacity, setAdminRoomCapacity] = useState<number>(50);
   const [adminRoomBufferTime, setAdminRoomBufferTime] = useState<number>(15);
-  const [adminRoomColor, setAdminRoomColor] = useState('from-slate-700 to-slate-900');
-  const [adminRoomFeatures, setAdminRoomFeatures] = useState('');
+  const [adminRoomColor, setAdminRoomColor] = useState('emerald');
+  const [adminRoomFeatures, setAdminRoomFeatures] = useState('Projector, Smart Board, AC, Wi-Fi');
   const [adminRoomImage, setAdminRoomImage] = useState('');
+  const [adminRoomVerificationSource, setAdminRoomVerificationSource] = useState('Administrator Verified Entry');
+
+  // Edit Room Modal state
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editBuilding, setEditBuilding] = useState('');
+  const [editDepartment, setEditDepartment] = useState('');
+  const [editRoomType, setEditRoomType] = useState('');
+  const [editCapacity, setEditCapacity] = useState<number>(0);
+  const [editFacilities, setEditFacilities] = useState('');
+  const [editVerificationSource, setEditVerificationSource] = useState('');
+  const [editIsVerified, setEditIsVerified] = useState(true);
+
+  const openEditModal = (room: Room) => {
+    setEditingRoom(room);
+    setEditName(room.name || '');
+    setEditBuilding(room.building || '');
+    setEditDepartment(room.contactDepartment || room.department || 'Central Administration & Academic Affairs');
+    setEditRoomType(room.roomType || room.category || 'Conference Room');
+    setEditCapacity(room.capacity || 0);
+    setEditFacilities((room.facilities || room.features || []).join(', '));
+    setEditVerificationSource(room.verificationSource || 'Verified by Admin');
+    setEditIsVerified(room.isVerified !== false);
+  };
+
+  const handleSaveEditRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRoom) return;
+    try {
+      const facilitiesArr = editFacilities.split(',').map(f => f.trim()).filter(Boolean);
+      await roomsAPI.update(editingRoom.id, {
+        name: editName,
+        building: editBuilding,
+        contactDepartment: editDepartment,
+        department: editDepartment,
+        roomType: editRoomType,
+        category: editRoomType,
+        capacity: Number(editCapacity),
+        facilities: facilitiesArr,
+        features: facilitiesArr,
+        verificationSource: editVerificationSource,
+        isVerified: editIsVerified
+      });
+      addToast(`Updated room details for "${editName}" successfully!`, 'success');
+      setEditingRoom(null);
+      onRefreshData();
+    } catch (err: any) {
+      addToast(`Update error: ${err.message}`, 'error');
+    }
+  };
+
+  const handleReseedIITBHURooms = async () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Reseed Official IIT (BHU) Rooms Dataset?',
+      message: `This will seed/refresh all verified IIT (BHU) Varanasi rooms, auditoriums, lecture halls, and laboratories into Firestore.\n\nTotal rooms to seed: ${defaultIITBHURooms.length} spaces.`,
+      confirmText: 'Seed Dataset',
+      cancelText: 'Cancel',
+      isDanger: false,
+      onConfirm: async () => {
+        try {
+          await roomsAPI.seedAllIITBHURooms();
+          addToast(`Successfully seeded ${defaultIITBHURooms.length} verified IIT (BHU) rooms into Firestore!`, 'success');
+          onRefreshData();
+        } catch (err: any) {
+          addToast(`Failed to seed dataset: ${err.message}`, 'error');
+        }
+      }
+    });
+  };
 
   // Bulk CSV States
   const [csvText, setCsvText] = useState('');
@@ -169,18 +245,29 @@ export function AdminPanel({
   const handleAdminAddRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const facilitiesArr = adminRoomFeatures.split(',').map(f => f.trim()).filter(Boolean);
       const payload = {
         name: adminRoomName,
+        roomName: adminRoomName,
+        building: adminRoomBuilding,
+        floor: adminRoomFloor,
+        contactDepartment: adminRoomDepartment,
+        department: adminRoomDepartment,
+        category: adminRoomType,
+        roomType: adminRoomType,
         capacity: Number(adminRoomCapacity),
         buffer_time: Number(adminRoomBufferTime),
-        features: adminRoomFeatures.split(',').map(f => f.trim()).filter(Boolean),
+        features: facilitiesArr,
+        facilities: facilitiesArr,
         image: adminRoomImage || undefined,
-        color: adminRoomColor
+        color: adminRoomColor,
+        isVerified: true,
+        verificationSource: adminRoomVerificationSource || 'Administrator Verified Entry'
       };
       await roomsAPI.create(payload);
-      addToast(`New space "${adminRoomName}" created successfully!`, 'success');
+      addToast(`New verified room "${adminRoomName}" created successfully!`, 'success');
       setAdminRoomName('');
-      setAdminRoomFeatures('');
+      setAdminRoomFeatures('Projector, Smart Board, AC, Wi-Fi');
       setAdminRoomBufferTime(15);
       setAdminRoomImage('');
       onRefreshData();
@@ -326,11 +413,19 @@ export function AdminPanel({
 
   return (
     <div className="space-y-8">
-      <div className="p-4.5 bg-slate-900 rounded-2xl border border-red-950/40 text-left">
-        <h2 className="text-lg font-bold tracking-tight text-rose-300">Administrative Oversight</h2>
-        <p className="text-xs text-slate-400 mt-0.5">
-          Verify registered academic accounts, modify structural permissions, manage rooms metadata, or force-delete booked slots.
-        </p>
+      <div className="p-4.5 bg-slate-900 rounded-2xl border border-red-950/40 text-left flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold tracking-tight text-rose-300">Administrative Oversight</h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Verify registered academic accounts, modify structural permissions, manage rooms metadata, or force-delete booked slots.
+          </p>
+        </div>
+        <button
+          onClick={handleReseedIITBHURooms}
+          className="px-3.5 py-2 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-800/60 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0"
+        >
+          <span>🌱 Seed Official IIT (BHU) Dataset</span>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -378,78 +473,111 @@ export function AdminPanel({
 
           {adminRoomTab === 'single' ? (
             <form onSubmit={handleAdminAddRoom} className="space-y-4 text-left">
-              <div>
-                <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Space Display Name*</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Satish Dhawan Lecture Suite"
-                  value={adminRoomName}
-                  onChange={(e) => setAdminRoomName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Seating capacity*</label>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Room Name / Number*</label>
                   <input
-                    type="number"
+                    type="text"
                     required
-                    value={adminRoomCapacity}
-                    onChange={(e) => setAdminRoomCapacity(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-855 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                    placeholder="e.g. CSE Conference Room / Room 201"
+                    value={adminRoomName}
+                    onChange={(e) => setAdminRoomName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-teal-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Buffer (minutes)*</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    value={adminRoomBufferTime}
-                    onChange={(e) => setAdminRoomBufferTime(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-855 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Visual Gradient color</label>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Department*</label>
                   <select
-                    value={adminRoomColor}
-                    onChange={(e) => setAdminRoomColor(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-855 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none"
+                    value={adminRoomDepartment}
+                    onChange={(e) => setAdminRoomDepartment(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-teal-500"
                   >
-                    <option value="from-slate-700 to-slate-900">Charcoal Slate</option>
-                    <option value="from-violet-600 to-indigo-800">Violet Indigo</option>
-                    <option value="from-amber-600 to-orange-800">Amber Boardroom</option>
-                    <option value="from-teal-600 to-emerald-800">Teal Lecture</option>
+                    {ALL_IITBHU_DEPARTMENTS.map(dept => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
                   </select>
                 </div>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Building Name*</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. CSE Department Building"
+                    value={adminRoomBuilding}
+                    onChange={(e) => setAdminRoomBuilding(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Room Type*</label>
+                  <select
+                    value={adminRoomType}
+                    onChange={(e) => setAdminRoomType(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-teal-500"
+                  >
+                    <option value="Seminar Hall">Seminar Hall</option>
+                    <option value="Conference Room">Conference Room</option>
+                    <option value="Classroom">Classroom</option>
+                    <option value="Lab">Lab</option>
+                    <option value="Meeting Room">Meeting Room</option>
+                    <option value="Auditorium">Auditorium</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Capacity (seats)*</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={adminRoomCapacity}
+                    onChange={(e) => setAdminRoomCapacity(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Features / Equipment list (Comma split)</label>
+                <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Available Facilities (Comma split)</label>
                 <input
                   type="text"
-                  placeholder="e.g. Acoustic soundproofing, Laser Projector, Smart Cooler"
+                  placeholder="e.g. Projector, Smart Board, AC, Video Conferencing, Wi-Fi"
                   value={adminRoomFeatures}
                   onChange={(e) => setAdminRoomFeatures(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-855 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-705 outline-none focus:border-indigo-500"
+                  className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-teal-500"
                 />
               </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Photo URL placeholder</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Unsplash photo URL"
-                  value={adminRoomImage}
-                  onChange={(e) => setAdminRoomImage(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-855 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-705 outline-none focus:border-indigo-500"
-                />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Verification Source</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Official Departmental Website / Records"
+                    value={adminRoomVerificationSource}
+                    onChange={(e) => setAdminRoomVerificationSource(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none focus:border-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Photo URL (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. https://images.unsplash.com/photo-1517502884422"
+                    value={adminRoomImage}
+                    onChange={(e) => setAdminRoomImage(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-xs text-slate-200 placeholder:text-slate-700 outline-none focus:border-teal-500"
+                  />
+                </div>
               </div>
+
               <button
                 type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl text-xs uppercase"
+                className="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-2.5 px-4 rounded-xl text-xs uppercase cursor-pointer transition-colors shadow-md"
               >
-                De novo Create Room
+                + Add Verified Room Entry
               </button>
             </form>
           ) : (
@@ -923,60 +1051,200 @@ export function AdminPanel({
         )}
       </div>
 
-      {/* Active Space Decommission list */}
+      {/* Active Space Management & Decommission List */}
       <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl">
-        <h3 className="text-sm font-bold text-white uppercase tracking-wider pb-3 border-b border-slate-850 mb-4 text-left">
-          Decommission Custom Spaces
+        <h3 className="text-sm font-bold text-white uppercase tracking-wider pb-3 border-b border-slate-850 mb-4 text-left flex items-center justify-between">
+          <span>Manage Registered Spaces ({rooms.length})</span>
+          <span className="text-xs text-slate-400 font-normal">Edit information, missing fields, or decommission spaces</span>
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {rooms.map((item) => (
             <div
               key={item.id}
-              className="p-3 bg-slate-950 border border-slate-855 rounded-xl flex items-center justify-between text-xs gap-3"
+              className="p-3.5 bg-slate-950 border border-slate-855 rounded-xl flex items-center justify-between text-xs gap-3"
             >
-              <div className="text-left">
-                <strong className="text-slate-200 block">{item.name}</strong>
-                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                  <span className="text-[10px] text-slate-500">Capacity: {item.capacity} seats</span>
-                  <span className="text-slate-700">•</span>
-                  <div className="flex items-center gap-1 text-[10px] text-slate-450">
-                    <span>Buffer:</span>
-                    <select
-                      value={item.buffer_time !== undefined ? item.buffer_time : 15}
-                      onChange={async (e) => {
-                        const val = Number(e.target.value);
-                        try {
-                          await roomsAPI.update(item.id, { buffer_time: val });
-                          addToast(`Buffer updated to ${val}m for "${item.name}"`, 'success');
-                          onRefreshData();
-                        } catch (err: any) {
-                          addToast(err.message || 'Failed to update buffer time.', 'error');
-                        }
-                      }}
-                      className="bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 text-slate-200 outline-none cursor-pointer focus:border-indigo-500 font-bold font-mono text-[9px]"
-                    >
-                      <option value="0">0m</option>
-                      <option value="5">5m</option>
-                      <option value="10">10m</option>
-                      <option value="15">15m</option>
-                      <option value="20">20m</option>
-                      <option value="30">30m</option>
-                      <option value="45">45m</option>
-                      <option value="60">60m</option>
-                    </select>
-                  </div>
+              <div className="text-left space-y-1">
+                <div className="flex items-center gap-2">
+                  <strong className="text-slate-200 block text-sm">{item.name}</strong>
+                  {item.isVerified ? (
+                    <span className="text-[9px] bg-teal-950 text-teal-300 border border-teal-800/60 px-1.5 py-0.5 rounded font-mono">
+                      Verified ✓
+                    </span>
+                  ) : (
+                    <span className="text-[9px] bg-amber-950 text-amber-300 border border-amber-800/60 px-1.5 py-0.5 rounded font-mono">
+                      Unverified
+                    </span>
+                  )}
                 </div>
+                <p className="text-[10.5px] text-teal-400 font-medium">
+                  {item.contactDepartment || item.department || 'General Department'} ({item.building || 'Main Campus'})
+                </p>
+                <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
+                  <span>Type: <strong className="text-slate-300">{item.roomType || item.category || 'N/A'}</strong></span>
+                  <span>•</span>
+                  <span>Capacity: <strong className="text-slate-300">{item.capacity || 'N/A'}</strong></span>
+                </div>
+                {item.missingInfo && item.missingInfo.length > 0 && (
+                  <span className="text-[9.5px] text-amber-400 block font-mono">
+                    ⚠️ Missing: {item.missingInfo.join(', ')}
+                  </span>
+                )}
               </div>
-              <button
-                onClick={() => handleAdminDeleteRoom(item.id, item.name)}
-                className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-350 py-1.5 px-3 border border-rose-900/40 rounded-lg shrink-0 font-bold font-mono text-[10px]"
-              >
-                Purge Room
-              </button>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => openEditModal(item)}
+                  className="bg-teal-950 hover:bg-teal-900 text-teal-200 py-1.5 px-2.5 border border-teal-800/60 rounded-lg font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>Edit</span>
+                </button>
+                <button
+                  onClick={() => handleAdminDeleteRoom(item.id, item.name)}
+                  className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-350 py-1.5 px-2.5 border border-rose-900/40 rounded-lg font-bold font-mono text-[10px] cursor-pointer transition-colors"
+                >
+                  Purge
+                </button>
+              </div>
             </div>
           ))}
         </div>
       </div>
+
+      {/* Edit Room Modal */}
+      {editingRoom && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-lg animate-scale-in text-left space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-teal-400" />
+                Edit Room Details: {editingRoom.name}
+              </h4>
+              <button
+                onClick={() => setEditingRoom(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditRoom} className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-1">Room Name / Number</label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-1">Department</label>
+                  <select
+                    value={editDepartment}
+                    onChange={(e) => setEditDepartment(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-teal-500"
+                  >
+                    {ALL_IITBHU_DEPARTMENTS.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-1">Building</label>
+                  <input
+                    type="text"
+                    required
+                    value={editBuilding}
+                    onChange={(e) => setEditBuilding(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-1">Room Type</label>
+                  <select
+                    value={editRoomType}
+                    onChange={(e) => setEditRoomType(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-teal-500"
+                  >
+                    <option value="Seminar Hall">Seminar Hall</option>
+                    <option value="Conference Room">Conference Room</option>
+                    <option value="Classroom">Classroom</option>
+                    <option value="Lab">Lab</option>
+                    <option value="Meeting Room">Meeting Room</option>
+                    <option value="Auditorium">Auditorium</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-1">Capacity</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editCapacity}
+                    onChange={(e) => setEditCapacity(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-1">Facilities (comma split)</label>
+                <input
+                  type="text"
+                  value={editFacilities}
+                  onChange={(e) => setEditFacilities(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-1">Verification Source</label>
+                <input
+                  type="text"
+                  value={editVerificationSource}
+                  onChange={(e) => setEditVerificationSource(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="editIsVerified"
+                  checked={editIsVerified}
+                  onChange={(e) => setEditIsVerified(e.target.checked)}
+                  className="rounded border-slate-800 bg-slate-950 text-teal-500 focus:ring-teal-500 cursor-pointer"
+                />
+                <label htmlFor="editIsVerified" className="text-xs text-slate-300 font-medium cursor-pointer">
+                  Mark as Publicly Verified Room
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingRoom(null)}
+                  className="px-4 py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 rounded-lg text-xs font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-semibold"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Academic Security & Audit Trail Logs (Admin Only) */}
       <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl text-left space-y-4">

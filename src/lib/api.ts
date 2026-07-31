@@ -119,67 +119,180 @@ export const authAPI = {
   }
 };
 
+import { verifiedIITBHURooms, seedVerifiedRoomsToFirestore } from '../firebase/seedRooms';
+
+export const defaultIITBHURooms = verifiedIITBHURooms;
+
+function computeMissingInfo(r: any): string[] {
+  const missing: string[] = [];
+  if (!r.capacity || Number(r.capacity) <= 0) missing.push('Capacity');
+  if (!r.building || r.building.trim() === '') missing.push('Building');
+  if (!r.contactDepartment && !r.department) missing.push('Department');
+  if ((!r.facilities || r.facilities.length === 0) && (!r.features || r.features.length === 0)) missing.push('Facilities');
+  return missing;
+}
+
 export const roomsAPI = {
   async list() {
     const q = query(collection(db, 'rooms'));
     const querySnapshot = await getDocs(q);
-    const data = querySnapshot.docs.map(d => {
+    let data = querySnapshot.docs.map(d => {
       const r = d.data();
+      const dept = r.contactDepartment || r.department || 'Central Administration & Academic Affairs';
+      const missing = r.missingInfo || computeMissingInfo(r);
       return {
         id: d.id,
         roomId: d.id,
         name: r.roomName || r.name,
         roomName: r.roomName || r.name,
+        roomNumber: r.roomNumber || r.roomName || r.name,
         building: r.building || '',
+        floor: r.floor || 'Ground Floor',
         capacity: Number(r.capacity || 0),
         facilities: r.facilities || r.features || [],
         features: r.facilities || r.features || [],
+        category: r.category || r.roomType || 'Seminar Hall',
+        roomType: r.roomType || r.category || 'Seminar Hall',
         status: r.status || 'available',
-        image: r.image || '',
+        image: r.image || 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&q=80&w=800',
         color: r.color || 'indigo',
+        contactDepartment: dept,
+        department: dept,
+        bestFor: r.bestFor || '',
+        mapCoords: r.mapCoords || { x: 50, y: 50 },
+        buffer_time: r.buffer_time || 15,
+        isVerified: r.isVerified !== undefined ? r.isVerified : true,
+        verificationSource: r.verificationSource || 'Verified IIT (BHU) Public Directory',
+        missingInfo: missing,
         createdAt: r.createdAt || new Date().toISOString()
       };
     });
+
+    // Auto-seed default IIT BHU rooms if collection is empty
+    if (data.length === 0) {
+      console.info('🌱 Auto-seeding initial verified IIT BHU campus rooms into Firestore...');
+      try {
+        await seedVerifiedRoomsToFirestore();
+        const freshSnap = await getDocs(query(collection(db, 'rooms')));
+        data = freshSnap.docs.map(d => {
+          const r = d.data();
+          const dept = r.contactDepartment || r.department || 'Central Administration & Academic Affairs';
+          return {
+            id: d.id,
+            roomId: d.id,
+            name: r.roomName || r.name,
+            roomName: r.roomName || r.name,
+            roomNumber: r.roomNumber || r.roomName || r.name,
+            building: r.building || '',
+            floor: r.floor || 'Ground Floor',
+            capacity: Number(r.capacity || 0),
+            facilities: r.facilities || r.features || [],
+            features: r.facilities || r.features || [],
+            category: r.category || r.roomType || 'Seminar Hall',
+            roomType: r.roomType || r.category || 'Seminar Hall',
+            status: r.status || 'available',
+            image: r.image || '',
+            color: r.color || 'indigo',
+            contactDepartment: dept,
+            department: dept,
+            bestFor: r.bestFor || '',
+            mapCoords: r.mapCoords || { x: 50, y: 50 },
+            buffer_time: r.buffer_time || 15,
+            isVerified: r.isVerified !== undefined ? r.isVerified : true,
+            verificationSource: r.verificationSource || 'Verified IIT (BHU) Public Directory',
+            missingInfo: r.missingInfo || computeMissingInfo(r),
+            createdAt: r.createdAt || new Date().toISOString()
+          };
+        });
+      } catch (seedErr) {
+        console.warn('Could not write default seed rooms directly, returning local fallback array.', seedErr);
+        data = defaultIITBHURooms.map(r => ({
+          ...r,
+          id: r.id || 'room-' + Math.random().toString(36).substring(2, 9),
+          roomId: r.id,
+          features: r.facilities,
+          department: r.contactDepartment
+        })) as any[];
+      }
+    }
 
     data.sort((a, b) => b.capacity - a.capacity);
     return data;
   },
 
+  async seedAllIITBHURooms() {
+    await seedVerifiedRoomsToFirestore();
+    await auditAPI.log('ROOM_BULK_SEED', `Connected and seeded ${defaultIITBHURooms.length} verified IIT BHU campus rooms`);
+    return defaultIITBHURooms;
+  },
+
   async create(room: any) {
     const roomId = room.roomId || room.id || 'room-' + Math.random().toString(36).substring(2, 9);
+    const dept = room.department || room.contactDepartment || 'Central Administration & Academic Affairs';
+    const facilities = room.facilities || room.features || [];
+    const missing = room.missingInfo || computeMissingInfo({ ...room, contactDepartment: dept, facilities });
+    
     const newRoom = {
       id: roomId,
       roomId: roomId,
       name: room.roomName || room.name,
       roomName: room.roomName || room.name,
-      building: room.building || '',
+      roomNumber: room.roomNumber || room.roomName || room.name,
+      building: room.building || 'Main Campus',
+      floor: room.floor || 'Ground Floor',
+      category: room.category || room.roomType || 'Seminar Hall',
+      roomType: room.roomType || room.category || 'Seminar Hall',
+      contactDepartment: dept,
+      department: dept,
+      bestFor: room.bestFor || '',
+      mapCoords: room.mapCoords || { x: 50, y: 50 },
       capacity: Number(room.capacity || 0),
-      facilities: room.facilities || room.features || [],
-      features: room.facilities || room.features || [],
+      buffer_time: Number(room.buffer_time || 15),
+      facilities,
+      features: facilities,
       status: room.status || 'available',
-      image: room.image || '',
+      image: room.image || 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&q=80&w=800',
       color: room.color || 'indigo',
+      isVerified: room.isVerified !== undefined ? room.isVerified : true,
+      verificationSource: room.verificationSource || 'Administrator Entry',
+      missingInfo: missing,
       createdAt: new Date().toISOString()
     };
 
     await setDoc(doc(db, 'rooms', roomId), newRoom);
-    await auditAPI.log('ROOM_CREATE', `Created room "${newRoom.name}" in building "${newRoom.building}"`);
+    await auditAPI.log('ROOM_CREATE', `Created room "${newRoom.name}" in building "${newRoom.building}" (${dept})`);
     return newRoom;
   },
 
   async update(id: string, room: any) {
+    const dept = room.department || room.contactDepartment || 'Central Administration & Academic Affairs';
+    const facilities = room.facilities || room.features || [];
+    const missing = room.missingInfo || computeMissingInfo({ ...room, contactDepartment: dept, facilities });
+
     const updatedRoom = {
       id,
       roomId: id,
       name: room.roomName || room.name,
       roomName: room.roomName || room.name,
+      roomNumber: room.roomNumber || room.roomName || room.name,
       building: room.building || '',
+      floor: room.floor || 'Ground Floor',
+      category: room.category || room.roomType || 'Seminar Hall',
+      roomType: room.roomType || room.category || 'Seminar Hall',
+      contactDepartment: dept,
+      department: dept,
+      bestFor: room.bestFor || '',
+      mapCoords: room.mapCoords || { x: 50, y: 50 },
       capacity: Number(room.capacity || 0),
-      facilities: room.facilities || room.features || [],
-      features: room.features || room.facilities || [],
+      buffer_time: Number(room.buffer_time || 15),
+      facilities,
+      features: facilities,
       status: room.status || 'available',
-      image: room.image || '',
+      image: room.image || 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&q=80&w=800',
       color: room.color || 'indigo',
+      isVerified: room.isVerified !== undefined ? room.isVerified : true,
+      verificationSource: room.verificationSource || 'Administrator Entry',
+      missingInfo: missing,
       createdAt: room.createdAt || new Date().toISOString()
     };
 
@@ -349,6 +462,13 @@ export const bookingsAPI = {
     await setDoc(doc(db, 'bookings', bookingId), newBooking);
     await auditAPI.log('BOOK_CREATE', `Created booking ID "${bookingId}" for "${roomName}" (${summary})`);
 
+    // Synchronize booking with Google Calendar in the background if approved
+    if (newBooking.status === 'Approved') {
+      import('../services/BookingSyncService').then(({ BookingSyncService }) => {
+        BookingSyncService.syncBooking(bookingId, 'create', newBooking);
+      });
+    }
+
     // Create a real-time notification in Firestore
     try {
       const notifId = 'notif-' + Math.random().toString(36).substring(2, 9);
@@ -416,6 +536,17 @@ export const bookingsAPI = {
 
     await setDoc(doc(db, 'bookings', id), updatedBooking, { merge: true });
     await auditAPI.log('BOOK_UPDATE', `Updated booking ID "${id}" for "${updatedBooking.roomName}"`);
+
+    // Fetch the updated complete booking and sync
+    getDoc(doc(db, 'bookings', id)).then(snap => {
+      if (snap.exists()) {
+        const fullBooking = snap.data();
+        import('../services/BookingSyncService').then(({ BookingSyncService }) => {
+          BookingSyncService.syncBooking(id, 'update', { id, ...fullBooking });
+        });
+      }
+    });
+
     return { id, ...updatedBooking };
   },
 
@@ -447,6 +578,11 @@ export const bookingsAPI = {
     await deleteDoc(docRef);
     await auditAPI.log('BOOK_CANCEL', `Cancelled booking ID "${id}" for "${target.roomName || target.room_name}"`);
 
+    // Synchronize deletion with Google Calendar in the background
+    import('../services/BookingSyncService').then(({ BookingSyncService }) => {
+      BookingSyncService.syncBooking(id, 'delete', { id, ...target });
+    });
+
     // Dispatch cancellation notification
     try {
       const notifId = 'notif-' + Math.random().toString(36).substring(2, 9);
@@ -471,16 +607,39 @@ export const bookingsAPI = {
   async approve(id: string) {
     await setDoc(doc(db, 'bookings', id), { status: 'Approved' }, { merge: true });
     await auditAPI.log('BOOK_APPROVE', `Approved reservation ID "${id}"`);
+
+    // Synchronize approval with Google Calendar in the background
+    getDoc(doc(db, 'bookings', id)).then(snap => {
+      if (snap.exists()) {
+        const fullBooking = snap.data();
+        import('../services/BookingSyncService').then(({ BookingSyncService }) => {
+          BookingSyncService.syncBooking(id, 'approve', { id, ...fullBooking, status: 'Approved' });
+        });
+      }
+    });
+
     return { success: true };
   },
 
   async reject(id: string, reason: string) {
-    await setDoc(doc(db, 'bookings', id), { 
+    const docRef = doc(db, 'bookings', id);
+    const docSnap = await getDoc(docRef);
+    const target = docSnap.exists() ? docSnap.data() : null;
+
+    await setDoc(docRef, { 
       status: 'Rejected', 
       rejectionReason: reason,
       rejection_reason: reason
     }, { merge: true });
     await auditAPI.log('BOOK_REJECT', `Rejected reservation ID "${id}" - Reason: "${reason}"`);
+
+    if (target) {
+      // Synchronize rejection with Google Calendar in the background (will delete calendar event if it existed)
+      import('../services/BookingSyncService').then(({ BookingSyncService }) => {
+        BookingSyncService.syncBooking(id, 'reject', { id, ...target, status: 'Rejected' });
+      });
+    }
+
     return { success: true };
   }
 };
@@ -615,20 +774,6 @@ export const auditAPI = {
     } catch (e) {
       console.warn('Failed to write audit log:', e);
     }
-  }
-};
-
-export const checkInAPI = {
-  async checkIn(bookingId: string) {
-    await setDoc(doc(db, 'bookings', bookingId), {
-      checkedIn: true,
-      checkInTime: new Date().toISOString()
-    }, { merge: true });
-    
-    // Add real audit log
-    await auditAPI.log('QR_CHECKIN', `Checked in for booking ID ${bookingId}`);
-    
-    return { success: true };
   }
 };
 

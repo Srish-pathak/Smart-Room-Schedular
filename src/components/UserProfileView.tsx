@@ -4,6 +4,7 @@ import { Booking, Room } from '../types';
 import { authAPI } from '../lib/api';
 import { collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
+import { GoogleAuthService } from '../services/GoogleAuthService';
 import { 
   User as UserIcon, 
   Mail, 
@@ -21,7 +22,13 @@ import {
   MessageSquare,
   FileText,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Calendar,
+  RefreshCw,
+  Video,
+  ExternalLink,
+  Link2,
+  Unlink
 } from 'lucide-react';
 
 interface UserProfileViewProps {
@@ -66,6 +73,52 @@ export const UserProfileView = ({
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [myFeedback, setMyFeedback] = useState<any[]>([]);
   const [loadingFeedback, setLoadingFeedback] = useState(false);
+
+  // Google Calendar Integration states
+  const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState<boolean>(false);
+
+  const checkGoogleStatus = async () => {
+    try {
+      const connected = await GoogleAuthService.isConnected();
+      setIsGoogleConnected(connected);
+    } catch {
+      setIsGoogleConnected(false);
+    }
+  };
+
+  useEffect(() => {
+    checkGoogleStatus();
+    const handleInvalidToken = () => setIsGoogleConnected(false);
+    window.addEventListener('google-token-invalid', handleInvalidToken);
+    return () => window.removeEventListener('google-token-invalid', handleInvalidToken);
+  }, []);
+
+  const handleConnectGoogle = async () => {
+    setIsConnectingGoogle(true);
+    try {
+      const token = await GoogleAuthService.authorize();
+      if (token) {
+        setIsGoogleConnected(true);
+        addToast('Google Calendar connected successfully!', 'success');
+      }
+    } catch (err: any) {
+      console.error('Google authorization error:', err);
+      addToast(err.message || 'Failed to connect Google Calendar', 'error');
+    } finally {
+      setIsConnectingGoogle(false);
+    }
+  };
+
+  const handleDisconnectGoogle = async () => {
+    try {
+      await GoogleAuthService.disconnect();
+      setIsGoogleConnected(false);
+      addToast('Google Calendar disconnected.', 'info');
+    } catch (err: any) {
+      addToast('Error disconnecting Google account', 'error');
+    }
+  };
 
   const fetchMyFeedback = async () => {
     if (!user?.uid && !user?.id) return;
@@ -473,6 +526,66 @@ export const UserProfileView = ({
             </button>
           </div>
         </form>
+      </div>
+
+      {/* ==========================================
+          SECTION: GOOGLE CALENDAR INTEGRATION
+          ========================================== */}
+      <div className={`p-6 rounded-3xl border text-left ${
+        isDarkMode ? 'bg-slate-900 border-slate-800/80' : 'bg-white border-stone-200 shadow-sm'
+      }`}>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#18A999]/10 border border-[#18A999]/30 text-[#18A999] flex items-center justify-center shrink-0">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className={`text-base font-extrabold ${isDarkMode ? 'text-white' : 'text-[#0a4735]'}`}>
+                  Direct Google Calendar Integration
+                </h3>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                  READY TO USE
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Save any confirmed room booking directly to your personal Google Calendar with a single click.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* FEATURES GRID */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className={`p-4 rounded-2xl border space-y-2 ${
+            isDarkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-stone-50 border-stone-200'
+          }`}>
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-400 uppercase tracking-wider font-mono text-[10px]">Integration Type</span>
+              <span className="font-mono font-bold text-[#18A999]">Direct Browser Template Link</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-400 uppercase tracking-wider font-mono text-[10px]">OAuth Requirements</span>
+              <span className="text-emerald-400 font-bold font-mono">None (100% Free)</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-400 uppercase tracking-wider font-mono text-[10px]">Account Compatibility</span>
+              <span className="text-slate-300 font-mono">All Personal & Workspace Google Accounts</span>
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-2xl border space-y-1.5 text-xs ${
+            isDarkMode ? 'bg-slate-950/60 border-slate-800 text-slate-300' : 'bg-stone-50 border-stone-200 text-slate-700'
+          }`}>
+            <div className="flex items-center gap-2 text-[#18A999] font-bold font-mono text-[10px] uppercase">
+              <CheckCircle className="w-3.5 h-3.5" />
+              <span>Instant Calendar Save</span>
+            </div>
+            <p className="text-[11px] leading-relaxed text-slate-400">
+              When a room reservation is confirmed, click "📅 Add to Google Calendar" to open Google Calendar in a new tab with meeting title, venue, agenda, organizer, and attendees pre-filled!
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* ==========================================

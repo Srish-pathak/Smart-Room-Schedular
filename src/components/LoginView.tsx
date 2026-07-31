@@ -456,7 +456,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               { text: 'Instant Booking', icon: <Zap className="w-3.5 h-3.5 text-indigo-500" /> },
               { text: 'Google Meet Syncing', icon: <Video className="w-3.5 h-3.5 text-purple-500" /> },
               { text: 'Conflict Protection', icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> },
-              { text: 'Email Alerts & QR Codes', icon: <BellRing className="w-3.5 h-3.5 text-amber-500" /> },
+              { text: 'Email Alerts & Syncing', icon: <BellRing className="w-3.5 h-3.5 text-amber-500" /> },
             ].map((feature, i) => (
               <div key={i} className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
                 {feature.icon}

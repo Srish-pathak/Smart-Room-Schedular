@@ -12,7 +12,12 @@ async function googleFetch(url: string, options: RequestInit = {}) {
     // Return high-quality, simulated IIT (BHU) campus data depending on the URL endpoint
     if (url.includes('/calendar/v3/calendars/primary/events')) {
       if (options.method === 'POST') {
-        return { id: 'mock-event-' + Date.now(), summary: 'Created Event' };
+        return {
+          id: 'mock-event-' + Date.now(),
+          summary: 'Created Event',
+          htmlLink: 'https://calendar.google.com',
+          hangoutLink: 'https://meet.google.com/mock-meet-link'
+        };
       }
       if (options.method === 'DELETE') {
         return null;
@@ -87,10 +92,37 @@ async function googleFetch(url: string, options: RequestInit = {}) {
     ...options.headers,
   };
 
-  const response = await fetch(url, { ...options, headers });
+  let response: Response | null = null;
+  let lastError: any = null;
+  const maxRetries = 3;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      response = await fetch(url, { ...options, headers });
+      if (response.ok || response.status === 204) {
+        break;
+      }
+      if ((response.status === 429 || response.status >= 500) && attempt < maxRetries) {
+        await new Promise(res => setTimeout(res, 500 * Math.pow(2, attempt - 1)));
+        continue;
+      }
+      break;
+    } catch (netErr: any) {
+      lastError = netErr;
+      if (attempt < maxRetries) {
+        await new Promise(res => setTimeout(res, 500 * Math.pow(2, attempt - 1)));
+        continue;
+      }
+    }
+  }
+
+  if (!response) {
+    throw new Error(`Google API request failed: ${lastError?.message || 'Network error'}. Please try again.`);
+  }
+
   if (!response.ok) {
     const errText = await response.text();
-    let parsedErr;
+    let parsedErr: any;
     try {
       parsedErr = JSON.parse(errText);
     } catch {
@@ -100,6 +132,7 @@ async function googleFetch(url: string, options: RequestInit = {}) {
     if (isAuthError) {
       clearAccessToken();
       window.dispatchEvent(new CustomEvent('google-token-invalid', { detail: { status: response.status, message: errText } }));
+      throw new Error(`Google Permission Error (${response.status}): Your session token is invalid or missing Calendar scopes. Please sign in again.`);
     }
     throw new Error(
       parsedErr?.error?.message || `Google API Error (${response.status}): ${errText}`
@@ -127,7 +160,7 @@ export const CalendarAPI = {
   },
 
   async createEvent(booking: Omit<Booking, 'id'>): Promise<any> {
-    const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all';
+    const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all&conferenceDataVersion=1';
     const descriptionLines = [
       `Smart Room Booking for ${booking.roomName}.`,
       `Booked by Faculty: ${booking.creatorName} (${booking.creatorEmail}).`,
@@ -152,13 +185,21 @@ export const CalendarAPI = {
       description: descriptionLines.join('\n'),
       start: {
         dateTime: booking.startTime,
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata',
       },
       end: {
         dateTime: booking.endTime,
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata',
       },
       attendees,
+      conferenceData: {
+        createRequest: {
+          requestId: 'meet-' + Math.random().toString(36).substring(2, 9),
+          conferenceSolutionKey: {
+            type: 'hangoutsMeet'
+          }
+        }
+      }
     };
 
     return googleFetch(url, {
@@ -168,7 +209,7 @@ export const CalendarAPI = {
   },
 
   async updateEvent(eventId: string, booking: Omit<Booking, 'id'>): Promise<any> {
-    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=all`;
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=all&conferenceDataVersion=1`;
     const descriptionLines = [
       `Smart Room Booking for ${booking.roomName || (booking as any).room_name}.`,
       `Booked by Faculty/User: ${booking.creatorName || (booking as any).creator_name} (${booking.creatorEmail || (booking as any).creator_email}).`,
@@ -193,13 +234,21 @@ export const CalendarAPI = {
       description: descriptionLines.join('\n'),
       start: {
         dateTime: booking.startTime || (booking as any).start_time,
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata',
       },
       end: {
         dateTime: booking.endTime || (booking as any).end_time,
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata',
       },
       attendees,
+      conferenceData: {
+        createRequest: {
+          requestId: 'meet-' + Math.random().toString(36).substring(2, 9),
+          conferenceSolutionKey: {
+            type: 'hangoutsMeet'
+          }
+        }
+      }
     };
 
     return googleFetch(url, {

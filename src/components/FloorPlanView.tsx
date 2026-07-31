@@ -5,7 +5,6 @@ import {
   Sparkles, 
   Info, 
   MapPin, 
-  QrCode,
   AlertTriangle
 } from 'lucide-react';
 
@@ -103,7 +102,6 @@ interface FloorPlanViewProps {
   adminBookings: any[];
   onChooseSlot: (room: Room) => void;
   onViewHistory: (room: Room) => void;
-  onShowQR: (room: Room) => void;
 }
 
 export function FloorPlanView({
@@ -112,7 +110,6 @@ export function FloorPlanView({
   adminBookings,
   onChooseSlot,
   onViewHistory,
-  onShowQR,
 }: FloorPlanViewProps) {
   // Bind database rooms to static coordinates, matching by substring or ID index
   const { mappedSlots, overflowRooms } = useMemo(() => {
@@ -724,11 +721,25 @@ export function FloorPlanView({
                   <span className="font-extrabold text-slate-200">{activeInspectedRoom.capacity} Academic Seats</span>
                 </div>
                 <div className="flex items-center justify-between text-xs border-t border-slate-850/60 pt-1.5">
-                  <span className="text-slate-500 font-mono">Location Segment</span>
-                  <span className="font-semibold text-indigo-400 text-[11px] uppercase tracking-wider">
-                    {FLOOR_PLAN_SLOTS.find(s => activeInspectedRoom.name.toLowerCase().includes(s.key))?.wing || 'Core Campus block'}
+                  <span className="text-slate-500 font-mono">Department / Unit</span>
+                  <span className="font-semibold text-slate-300 text-[11px] tracking-wider">
+                    {activeInspectedRoom.contactDepartment || 'Academic Section'}
                   </span>
                 </div>
+                <div className="flex items-center justify-between text-xs border-t border-slate-850/60 pt-1.5">
+                  <span className="text-slate-500 font-mono">Building & Floor</span>
+                  <span className="font-semibold text-indigo-400 text-[11px] uppercase tracking-wider">
+                    {activeInspectedRoom.building || 'Main Campus'} • {activeInspectedRoom.floor || 'Ground Floor'}
+                  </span>
+                </div>
+                {activeInspectedRoom.bestFor && (
+                  <div className="flex items-center justify-between text-xs border-t border-slate-850/60 pt-1.5">
+                    <span className="text-slate-500 font-mono">Best Suited For</span>
+                    <span className="font-semibold text-emerald-400 text-[11px]">
+                      {activeInspectedRoom.bestFor}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Amenity Badges */}
@@ -827,18 +838,10 @@ export function FloorPlanView({
 
             {/* FOOTER CTA BAR */}
             <div className="pt-4 border-t border-slate-850 flex items-center justify-between gap-3 shrink-0">
-              <button
-                onClick={() => onShowQR(activeInspectedRoom)}
-                className="flex-1 bg-slate-850 hover:bg-slate-800 border border-slate-700/60 text-slate-300 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <QrCode className="w-3.5 h-3.5 shrink-0" />
-                QR CODE
-              </button>
-
               {activeInspectedRoom.status === 'available' ? (
                 <button
                   onClick={() => onChooseSlot(activeInspectedRoom)}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-950/30 transition-all flex items-center justify-center gap-1 cursor-pointer"
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-950/30 transition-all flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
                   CHOOSE SLOT
@@ -846,7 +849,7 @@ export function FloorPlanView({
               ) : (
                 <button
                   disabled
-                  className="flex-1 bg-slate-850/50 text-slate-650 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest cursor-not-allowed flex items-center justify-center gap-1.5"
+                  className="w-full bg-slate-850/50 text-slate-650 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
                   <AlertTriangle className="w-3.5 h-3.5 text-slate-650" />
                   OCCUPIED

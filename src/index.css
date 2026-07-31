@@ -2,90 +2,100 @@
 @import "tailwindcss";
 
 :root {
-  /* IIT (BHU) Premium Theme Color Palette: Forest Greens, Cream, and Soft Golds */
-  --indigo-50: #faf8f2;     /* Extra light cream */
-  --indigo-100: #f6ebd4;    /* Light gold/cream */
-  --indigo-200: #ead29c;    /* Soft gold */
-  --indigo-300: #dfb965;    /* Premium gold */
-  --indigo-400: #d4af37;    /* IIT BHU Gold accent */
-  --indigo-500: #c09728;    /* Deep gold accent */
-  --indigo-600: #0a4735;    /* IIT BHU Forest Green (medium) */
-  --indigo-700: #073b2c;    /* Deep Forest Green */
-  --indigo-800: #042e22;    /* Darkest Forest Green */
-  --indigo-900: #021e16;    /* Ultra Deep Green */
-  --indigo-950: #01120d;    /* Sacred Forest Green shadow */
+  /* Modern Teal Color Palette */
+  --teal-primary: #18A999;
+  --teal-dark: #128A7E;
+  --teal-hover: #159487;
+  --teal-light: #EAF8F6;
+  --page-bg: #F8FAFC;
+  --card-bg: #FFFFFF;
+  --border-color: #E5E7EB;
+  --text-dark: #111827;
 
-  --violet-50: #fcfaf6;     /* Cream background light */
-  --violet-100: #f7f3e8;    /* Muted gold-white */
-  --violet-200: #ebdcb9;    /* Gold highlight border */
-  --violet-300: #d4c28d;
-  --violet-400: #bfa660;
-  --violet-500: #c5a039;    /* Luminous gold tint */
-  --violet-600: #a78129;
-  --violet-700: #8b661d;
-  --violet-800: #6e4e14;
-  --violet-900: #52380d;
-  --violet-950: #352106;
+  /* Mapped Tailwind Indigo / Accent scale to Modern Teal */
+  --indigo-50: #EAF8F6;     /* Light Background */
+  --indigo-100: #D1F2ED;    /* Soft teal background */
+  --indigo-200: #A3E5DC;    /* Light teal border/chip */
+  --indigo-300: #52C8BB;    /* Vibrant teal accent */
+  --indigo-400: #18A999;    /* Primary Teal */
+  --indigo-500: #159487;    /* Hover Teal */
+  --indigo-600: #128A7E;    /* Dark Teal */
+  --indigo-700: #0E6E64;    /* Deep Teal */
+  --indigo-800: #0B534B;    /* Darkest Teal */
+  --indigo-900: #073B35;    /* Very Deep Teal */
+  --indigo-950: #042320;    /* Teal Shadow / Dark Accent */
 
-  /* Neutrals mapped for soft cream/white layouts and rich green-charcoal typography */
-  --slate-50: #031c14;      /* Pure rich ink-green-black for headings */
-  --slate-100: #062b1f;     /* Deep forest green headings */
-  --slate-200: #0c3e2e;     /* Interactive elements and sub-text */
-  --slate-300: #265545;     /* Body labels & titles */
-  --slate-400: #496c5f;     /* Descriptions & inactive subheadings */
-  --slate-500: #074735;     /* Highlight indicator color */
-  --slate-600: #053b2c;     /* Accent borders/indicators */
-  --slate-700: #032e22;     /* Forest deep background */
-  --slate-750: #e8e4da;     /* Subtle warm-cream separator borders */
-  --slate-800: #faf8f5;     /* Muted layout panels and tables */
-  --slate-850: #f4f1e9;     /* Cream background card tracks */
-  --slate-900: #ffffff;     /* Pure, high-end white card canvases */
-  --slate-950: #FAF9F5;     /* Exquisite warm-cream page background canvas */
+  --violet-50: #EAF8F6;
+  --violet-100: #D1F2ED;
+  --violet-200: #A3E5DC;
+  --violet-300: #52C8BB;
+  --violet-400: #18A999;
+  --violet-500: #159487;
+  --violet-600: #128A7E;
+  --violet-700: #0E6E64;
+  --violet-800: #0B534B;
+  --violet-900: #073B35;
+  --violet-950: #042320;
 
-  --text-main: #031c14;
+  /* Neutrals mapped to clean, high-contrast Slate / Gray */
+  --slate-50: #111827;      /* Text dark */
+  --slate-100: #1F2937;     /* Subtext dark */
+  --slate-200: #374151;     /* Text medium */
+  --slate-300: #4B5563;     /* Muted text */
+  --slate-400: #6B7280;     /* Inactive label */
+  --slate-500: #18A999;     /* Primary indicator */
+  --slate-600: #128A7E;     /* Dark teal accent */
+  --slate-700: #1F2937;
+  --slate-750: #E5E7EB;     /* Borders */
+  --slate-800: #F3F4F6;     /* Light gray card track */
+  --slate-850: #EAF8F6;     /* Light teal card track */
+  --slate-900: #FFFFFF;     /* Cards background */
+  --slate-950: #F8FAFC;     /* Page background */
+
+  --text-main: #111827;
 }
 
 html.dark {
-  /* Dark Mode Overrides to support Forest Green / Gold theme elegantly */
-  --slate-50: #ffffff;      /* Bright white for high-contrast dark headings */
-  --slate-100: #f6ebd4;     /* Light cream for general headings */
-  --slate-200: #ead29c;     /* Soft gold for subheadings & main text */
-  --slate-300: #dfb965;     /* Premium gold for secondary text */
-  --slate-400: #a5bcae;     /* Pale green-gray for descriptions & inactive text */
-  --slate-500: #dfb965;     /* Gold highlight color */
-  --slate-600: #c09728;     /* Deep gold accent */
-  --slate-700: #01120d;     /* Dark green backdrop */
-  --slate-750: #0d382d;     /* Muted dark green border separator */
-  --slate-800: #04241c;     /* Muted dark green panels */
-  --slate-850: #031c15;     /* Darker cream/green track */
-  --slate-900: #021a14;     /* Deep rich green-black card canvas (instead of pure white) */
-  --slate-950: #01100b;     /* Main background: very deep dark forest green-black (instead of warm cream) */
+  /* Dark Mode Overrides for Modern Teal */
+  --slate-50: #F8FAFC;      /* High contrast headings */
+  --slate-100: #F1F5F9;     /* Light subtext */
+  --slate-200: #E2E8F0;     /* Secondary text */
+  --slate-300: #CBD5E1;     /* Body text */
+  --slate-400: #94A3B8;     /* Muted text */
+  --slate-500: #18A999;     /* Teal primary */
+  --slate-600: #159487;     /* Teal hover */
+  --slate-700: #0F172A;     /* Background dark */
+  --slate-750: #1E293B;     /* Border dark */
+  --slate-800: #112926;     /* Muted panel dark */
+  --slate-850: #0A1E1C;     /* Track dark */
+  --slate-900: #0F2321;     /* Card background dark */
+  --slate-950: #081615;     /* Page background dark */
 
-  --indigo-50: #01120d;     /* Muted dark forest green shadow background */
-  --indigo-100: #032e22;    /* Darkest green background card track */
-  --indigo-200: #0a4735;    /* IIT BHU Forest Green (medium) */
-  --indigo-300: #ead29c;    /* Soft gold */
-  --indigo-400: #dfb965;    /* Premium gold */
-  --indigo-500: #d4af37;    /* IIT BHU Gold accent */
-  --indigo-600: #dfb965;    /* Invert forest green/gold for buttons */
-  --indigo-700: #f6ebd4;    /* Light text */
-  --indigo-800: #ffffff;
-  --indigo-900: #ffffff;
-  --indigo-950: #ffffff;
+  --indigo-50: #042320;
+  --indigo-100: #073B35;
+  --indigo-200: #0E6E64;
+  --indigo-300: #128A7E;
+  --indigo-400: #18A999;
+  --indigo-500: #159487;
+  --indigo-600: #18A999;
+  --indigo-700: #EAF8F6;
+  --indigo-800: #FFFFFF;
+  --indigo-900: #FFFFFF;
+  --indigo-950: #FFFFFF;
 
-  --violet-50: #01120d;
-  --violet-100: #021a14;
-  --violet-200: #0d382d;
-  --violet-300: #dfb965;
-  --violet-400: #ead29c;
-  --violet-500: #d4af37;
-  --violet-600: #f6ebd4;
-  --violet-700: #ffffff;
-  --violet-800: #ffffff;
-  --violet-900: #ffffff;
-  --violet-950: #ffffff;
+  --violet-50: #042320;
+  --violet-100: #073B35;
+  --violet-200: #0E6E64;
+  --violet-300: #128A7E;
+  --violet-400: #18A999;
+  --violet-500: #159487;
+  --violet-600: #18A999;
+  --violet-700: #EAF8F6;
+  --violet-800: #FFFFFF;
+  --violet-900: #FFFFFF;
+  --violet-950: #FFFFFF;
 
-  --text-main: #f6ebd4;
+  --text-main: #F1F5F9;
 }
 
 @theme {

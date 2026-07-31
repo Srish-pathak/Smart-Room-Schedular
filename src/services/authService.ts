@@ -288,7 +288,7 @@ export const authService = {
   /**
    * Processes a Google User credential to sync/onboard them in Firestore and set session tokens.
    */
-  async processGoogleUser(user: FirebaseUser) {
+  async processGoogleUser(user: FirebaseUser, accessToken?: string) {
     let role: 'student' | 'faculty' | 'admin' = 'student';
     let fullName = user.displayName || user.email?.split('@')[0] || 'Google User';
     const email = user.email || '';
@@ -297,6 +297,15 @@ export const authService = {
     const userDoc = await getDoc(userDocRef);
 
     let userProfile: UserProfile;
+
+    const googleData: any = {
+      googleConnected: true,
+      calendarConnected: true
+    };
+    if (accessToken) {
+      googleData.googleAccessToken = accessToken;
+      googleData.googleTokenTimestamp = Date.now();
+    }
 
     if (userDoc.exists()) {
       const profileData = userDoc.data() as UserProfile;
@@ -312,8 +321,7 @@ export const authService = {
       await updateDoc(userDocRef, {
         lastLogin: userProfile.lastLogin,
         isVerified: userProfile.isVerified,
-        googleConnected: true,
-        calendarConnected: true
+        ...googleData
       });
     } else {
       // Setup default role for Google users
@@ -326,7 +334,8 @@ export const authService = {
         profilePhoto: user.photoURL || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(fullName)}`,
         createdAt: new Date().toISOString(),
         lastLogin: new Date().toISOString(),
-        isVerified: user.emailVerified
+        isVerified: user.emailVerified,
+        ...googleData
       };
       await setDoc(userDocRef, userProfile);
     }
@@ -356,6 +365,9 @@ export const authService = {
   async signInWithGoogle() {
     try {
       const provider = new GoogleAuthProvider();
+      // Ensure the Google Calendar Events scope is requested during sign-in
+      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      
       if (isRunningInIframe()) {
         sessionStorage.setItem('auth_redirect_pending', 'true');
         await signInWithRedirect(auth, provider);
@@ -364,7 +376,12 @@ export const authService = {
       } else {
         const userCredential = await signInWithPopup(auth, provider);
         const user = userCredential.user;
-        return await this.processGoogleUser(user);
+        const credential = GoogleAuthProvider.credentialFromResult(userCredential);
+        const accessToken = credential?.accessToken || undefined;
+        if (accessToken) {
+          sessionStorage.setItem('google_workspace_access_token', accessToken);
+        }
+        return await this.processGoogleUser(user, accessToken);
       }
     } catch (error: any) {
       console.error('Google Sign In Error in authService:', error);

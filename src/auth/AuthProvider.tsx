@@ -61,10 +61,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (result && active) {
           console.info('Successfully completed Google Redirect Authentication:', result.user.email);
           const credential = GoogleAuthProvider.credentialFromResult(result);
-          if (credential?.accessToken) {
-            sessionStorage.setItem('google_workspace_access_token', credential.accessToken);
+          const accessToken = credential?.accessToken || undefined;
+          if (accessToken) {
+            sessionStorage.setItem('google_workspace_access_token', accessToken);
           }
-          await authService.processGoogleUser(result.user);
+          await authService.processGoogleUser(result.user, accessToken);
         }
       } catch (error: any) {
         if (active) {

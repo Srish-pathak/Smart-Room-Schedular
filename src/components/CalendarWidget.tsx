@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Room } from '../types';
 import { bookingsAPI } from '../lib/api';
-import { CalendarAPI } from '../lib/workspace';
-import { getAccessToken, googleSignIn, clearAccessToken, auth } from '../lib/auth';
+import { createGoogleCalendarUrl, buildMeetingDetailsText } from '../utils/calendarUrl';
 import {
   Calendar,
   Clock,
@@ -17,7 +16,10 @@ import {
   Shuffle,
   ArrowRight,
   ExternalLink,
-  Edit2
+  Edit2,
+  Copy,
+  CheckCircle2,
+  Share2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -46,29 +48,24 @@ export default function CalendarWidget({
   const [showBookModal, setShowBookModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverConflict, setServerConflict] = useState<any>(null);
-  const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
-  const [googleUser, setGoogleUser] = useState<any>(null);
-  const [isConnectingGoogle, setIsConnectingGoogle] = useState<boolean>(false);
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const checkGoogleConn = async () => {
-      const token = await getAccessToken();
-      const firebaseUser = auth.currentUser;
-      if (token && firebaseUser) {
-        setIsGoogleConnected(true);
-        setGoogleUser(firebaseUser);
-      } else {
-        setIsGoogleConnected(false);
-        setGoogleUser(null);
-      }
-    };
-    checkGoogleConn();
-
-    const interval = setInterval(checkGoogleConn, 2000);
-    return () => clearInterval(interval);
-  }, []);
+  // Success Confirmation Modal State
+  const [successBooking, setSuccessBooking] = useState<{
+    title: string;
+    roomName: string;
+    building?: string;
+    startTime: string;
+    endTime: string;
+    date?: string;
+    description?: string;
+    organizer?: string;
+    organizerEmail?: string;
+    attendees?: string[];
+    notes?: string;
+  } | null>(null);
+  const [copiedSuccess, setCopiedSuccess] = useState<boolean>(false);
   const [conflictResolverData, setConflictResolverData] = useState<{
     requestedRoom: Room;
     requestedStartTime: string;
@@ -324,35 +321,10 @@ export default function CalendarWidget({
     }
   }, [startTime, endTime]);
 
-  const handleConnectGoogle = async () => {
-    try {
-      setIsConnectingGoogle(true);
-      const res = await googleSignIn();
-      if (res) {
-        setIsGoogleConnected(true);
-        setGoogleUser(res.user);
-        alert('Successfully connected your Google Account!');
-        fetchCalendarEvents();
-      }
-    } catch (err: any) {
-      alert(err.message || 'Failed to connect Google Account.');
-    } finally {
-      setIsConnectingGoogle(false);
-    }
-  };
-
-  const handleDisconnectGoogle = () => {
-    clearAccessToken();
-    setIsGoogleConnected(false);
-    setGoogleUser(null);
-    alert('Disconnected from Google Account.');
-  };
-
   const fetchCalendarEvents = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Fetch central database reservations
       const dbBookings = await bookingsAPI.list();
       const bookingsArray = Array.isArray(dbBookings) ? dbBookings : [];
       
@@ -365,10 +337,6 @@ export default function CalendarWidget({
         start: { dateTime: b.start_time },
         end: { dateTime: b.end_time },
         attendees: b.attendee_email ? [{ email: b.attendee_email }] : [],
-        google_event_id: b.google_event_id || null,
-        google_calendar_link: b.google_calendar_link || null,
-        google_sync_status: b.google_sync_status || 'not_connected',
-        google_sync_error: b.google_sync_error || null,
         faculty_id: b.faculty_id || ''
       }));
 
@@ -648,7 +616,7 @@ export default function CalendarWidget({
       await bookingsAPI.create({
         roomId: targetRoomId,
         roomName: targetRoomName,
-        summary,
+        summary: summary || 'Room Reservation',
         agenda,
         startTime: startDateTime,
         endTime: endDateTime,
@@ -657,13 +625,29 @@ export default function CalendarWidget({
         bypassConflict: true
       });
 
+      const confirmedData = {
+        title: summary || 'Room Reservation',
+        roomName: targetRoomName,
+        building: (rooms || []).find(r => r.id === targetRoomId)?.building || 'Main Campus',
+        startTime: startDateTime,
+        endTime: endDateTime,
+        date,
+        description: agenda,
+        organizer: userName || 'Faculty Member',
+        organizerEmail: userEmail || 'user@iitbhu.ac.in',
+        attendees: attendeeEmail ? [attendeeEmail] : [],
+        notes: agenda
+      };
+
       setConflictResolverData(null);
       setShowBookModal(false);
       setSummary('');
       setAgenda('');
       setFacultyId('');
       setAttendeeEmail('');
-      onBookingAdded(targetRoomName, summary, startDateTime, endDateTime, agenda || '');
+
+      setSuccessBooking(confirmedData);
+      onBookingAdded(targetRoomName, summary || 'Room Reservation', startDateTime, endDateTime, agenda || '');
       await fetchCalendarEvents();
     } catch (err: any) {
       alert(`Conflict Resolver Booking Error: ${err.message || 'Error occurred.'}`);
@@ -688,68 +672,6 @@ export default function CalendarWidget({
     const startDateTime = new Date(`${date}T${startTime}:00`).toISOString();
     const endDateTime = new Date(`${date}T${endTime}:00`).toISOString();
 
-    let googleEventId = null;
-    let googleCalendarLink = null;
-    let googleSyncStatus = 'not_connected';
-    let googleSyncError = null;
-
-    if (isEditing && editingBookingId) {
-      // Find existing event to keep any existing sync properties
-      const existing = events.find((ev) => ev.id === editingBookingId);
-      if (existing) {
-        googleEventId = existing.google_event_id || null;
-        googleCalendarLink = existing.google_calendar_link || null;
-        googleSyncStatus = existing.google_sync_status || 'not_connected';
-        googleSyncError = existing.google_sync_error || null;
-      }
-    }
-
-    if (isGoogleConnected) {
-      try {
-        if (isEditing && googleEventId) {
-          // Update existing Google Calendar event
-          const updatedEvent = await CalendarAPI.updateEvent(googleEventId, {
-            roomName,
-            summary,
-            startTime: startDateTime,
-            endTime: endDateTime,
-            agenda: agenda || '',
-            attendeeEmail: attendeeEmail || '',
-            creatorName: userName || 'Faculty User',
-            creatorEmail: userEmail || 'user@iitbhu.ac.in',
-          });
-          if (updatedEvent && updatedEvent.id) {
-            googleEventId = updatedEvent.id;
-            googleCalendarLink = updatedEvent.htmlLink || null;
-            googleSyncStatus = 'synced';
-            googleSyncError = null;
-          }
-        } else {
-          // Create new Google Calendar event
-          const calEvent = await CalendarAPI.createEvent({
-            roomName,
-            summary,
-            startTime: startDateTime,
-            endTime: endDateTime,
-            agenda: agenda || '',
-            attendeeEmail: attendeeEmail || '',
-            creatorName: userName || 'Faculty User',
-            creatorEmail: userEmail || 'user@iitbhu.ac.in',
-          });
-          if (calEvent && calEvent.id) {
-            googleEventId = calEvent.id;
-            googleCalendarLink = calEvent.htmlLink || null;
-            googleSyncStatus = 'synced';
-            googleSyncError = null;
-          }
-        }
-      } catch (calErr: any) {
-        console.error('Google Calendar syncing failed during submit:', calErr);
-        googleSyncStatus = 'failed';
-        googleSyncError = calErr.message || 'Unknown calendar error';
-      }
-    }
-
     try {
       if (isEditing && editingBookingId) {
         await bookingsAPI.update(editingBookingId, {
@@ -761,10 +683,6 @@ export default function CalendarWidget({
           endTime: endDateTime,
           attendeeEmail: attendeeEmail || undefined,
           facultyId: facultyId || undefined,
-          google_event_id: googleEventId,
-          google_calendar_link: googleCalendarLink,
-          google_sync_status: googleSyncStatus,
-          google_sync_error: googleSyncError,
           bypassConflict: bypassConflict
         });
       } else {
@@ -777,13 +695,23 @@ export default function CalendarWidget({
           endTime: endDateTime,
           attendeeEmail: attendeeEmail || undefined,
           facultyId: facultyId || undefined,
-          google_event_id: googleEventId,
-          google_calendar_link: googleCalendarLink,
-          google_sync_status: googleSyncStatus,
-          google_sync_error: googleSyncError,
           bypassConflict: bypassConflict
         });
       }
+
+      const confirmedData = {
+        title: summary,
+        roomName,
+        building: selectedRoom?.building || 'Main Campus',
+        startTime: startDateTime,
+        endTime: endDateTime,
+        date,
+        description: agenda,
+        organizer: userName || 'Faculty Member',
+        organizerEmail: userEmail || 'user@iitbhu.ac.in',
+        attendees: attendeeEmail ? [attendeeEmail] : [],
+        notes: agenda
+      };
 
       setShowBookModal(false);
       setSummary('');
@@ -793,6 +721,7 @@ export default function CalendarWidget({
       setIsEditing(false);
       setEditingBookingId(null);
 
+      setSuccessBooking(confirmedData);
       onBookingAdded(roomName, summary, startDateTime, endDateTime, agenda || '');
       await fetchCalendarEvents();
     } catch (err: any) {
@@ -813,19 +742,7 @@ export default function CalendarWidget({
 
     try {
       setLoading(true);
-
-      const targetEvent = events.find((e) => e.id === eventId);
-      if (targetEvent && targetEvent.google_event_id && isGoogleConnected) {
-        try {
-          await CalendarAPI.deleteEvent(targetEvent.google_event_id);
-        } catch (calErr: any) {
-          console.error('Google Calendar event deletion failed:', calErr);
-        }
-      }
-
-      // Delete booking via API proxy
       await bookingsAPI.delete(eventId);
-
       await fetchCalendarEvents();
       onRefreshRoomsStatus();
     } catch (err: any) {
@@ -871,67 +788,34 @@ export default function CalendarWidget({
         </div>
       )}
 
-      {/* Google Account Connection Status Card */}
-      <div className={`mb-6 p-4 rounded-xl border ${
-        isGoogleConnected 
-          ? 'bg-indigo-950/20 border-indigo-500/30' 
-          : 'bg-slate-950/40 border-slate-800/60'
-      } flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs`}>
+      {/* Direct Calendar Add Information Banner */}
+      <div className="mb-6 p-4 rounded-xl border bg-[#18A999]/10 border-[#18A999]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-lg ${isGoogleConnected ? 'bg-indigo-950/80 text-indigo-400 border border-indigo-500/20' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
-            <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-              <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.71 0 3.27.61 4.5 1.64l2.39-2.39C17.65 1.94 15.105 1 12.24 1 6.7 1 2.2 5.5 2.2 11s4.5 10 10.04 10c5.79 0 9.64-4.07 9.64-9.82 0-.66-.08-1.3-.22-1.895H12.24z"/>
-            </svg>
+          <div className="p-2 rounded-lg bg-[#18A999]/20 text-[#18A999] border border-[#18A999]/30">
+            <Calendar className="w-5 h-5" />
           </div>
           <div className="text-left">
             <h4 className="font-semibold text-slate-200">
-              {isGoogleConnected ? 'Google Workspace Connected' : 'Google Workspace Integration'}
+              Direct Google Calendar Integration
             </h4>
             <p className="text-slate-400 text-[11px] mt-0.5 leading-relaxed">
-              {isGoogleConnected 
-                ? `Synced to Google Calendar as ${googleUser?.email || 'Faculty Account'}`
-                : 'Connect your IIT-BHU Google Account to automatically sync schedules, create meetings, and access Workspace.'}
+              Book your room seamlessly in Firestore and click <strong className="text-[#18A999]">"📅 Add to Google Calendar"</strong> after confirmation to save meetings directly into your personal calendar without any OAuth setup!
             </p>
           </div>
         </div>
-        {isGoogleConnected ? (
-          <button
-            onClick={handleDisconnectGoogle}
-            className="px-3 py-1.5 rounded-lg border border-rose-800/40 bg-rose-950/20 hover:bg-rose-950/40 text-rose-300 transition-all font-medium whitespace-nowrap cursor-pointer"
-          >
-            Disconnect Account
-          </button>
-        ) : (
-          <button
-            onClick={handleConnectGoogle}
-            disabled={isConnectingGoogle}
-            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-all font-medium whitespace-nowrap flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
-          >
-            {isConnectingGoogle ? (
-              <>
-                <Loader className="w-3.5 h-3.5 animate-spin" />
-                Connecting...
-              </>
-            ) : (
-              <>
-                Connect Google Account
-              </>
-            )}
-          </button>
-        )}
       </div>
 
       {loading && events.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 gap-2 text-slate-400">
           <Loader className="w-8 h-8 animate-spin text-indigo-500" />
-          <span className="text-sm font-medium">Fetching real-time Google Calendar events...</span>
+          <span className="text-sm font-medium">Fetching real-time room reservations...</span>
         </div>
       ) : events.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 bg-slate-950/40 rounded-xl border border-slate-900/30">
           <Calendar className="w-10 h-10 text-slate-700 mb-3" />
-          <p className="text-sm font-medium text-slate-400">No upcoming meetings listed on your Calendar</p>
+          <p className="text-sm font-medium text-slate-400">No upcoming room reservations scheduled</p>
           <p className="text-xs text-slate-500 max-w-sm mt-1 px-4">
-            Book a room above to place a live scheduling reservation onto your real Google Calendar feed!
+            Book a room above to place a room reservation!
           </p>
         </div>
       ) : (
@@ -970,7 +854,7 @@ export default function CalendarWidget({
                 animate={{ opacity: 1, y: 0 }}
                 className="group relative flex flex-col justify-between p-4 bg-slate-950 border border-slate-800/80 rounded-xl transition-all hover:border-slate-700 hover:shadow-lg"
               >
-                <div className="flex items-center justify-between w-full">
+                <div className="flex items-center justify-between w-full flex-wrap gap-2">
                   <div className="flex items-start gap-3">
                     <div className="bg-indigo-950/60 p-2.5 rounded-lg border border-indigo-900/40 text-indigo-400">
                       <Clock className="w-4 h-4" />
@@ -992,19 +876,27 @@ export default function CalendarWidget({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1 shrink-0">
-                    {/* Open in Google Calendar External Link */}
-                    {event.google_calendar_link && (
-                      <a
-                        href={event.google_calendar_link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-indigo-950/40 rounded-lg transition-all"
-                        title="Open in Google Calendar"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Add to Google Calendar Button */}
+                    <a
+                      href={createGoogleCalendarUrl({
+                        title: event.summary || 'IIT (BHU) Room Booking',
+                        roomName: event.location || 'IIT (BHU) Campus',
+                        startTime: event.start?.dateTime || new Date().toISOString(),
+                        endTime: event.end?.dateTime || new Date().toISOString(),
+                        description: event.description,
+                        organizer: event.creator?.displayName,
+                        organizerEmail: event.creator?.email,
+                        notes: event.description
+                      })}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-[#18A999] bg-[#18A999]/10 hover:bg-[#18A999]/20 border border-[#18A999]/30 rounded-lg transition-all"
+                      title="Add to Google Calendar in new tab"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>Add to Calendar</span>
+                    </a>
 
                     {/* Edit Booking (Only if owner) */}
                     {(event.creator?.email?.toLowerCase() === userEmail.toLowerCase()) && (
@@ -1719,6 +1611,135 @@ export default function CalendarWidget({
               >
                 Modify Schedule Manually
               </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Booking Confirmed Success Modal */}
+      {successBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0, y: 15 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="w-full max-w-lg bg-slate-900 border border-[#18A999]/50 rounded-2xl overflow-hidden shadow-2xl text-left"
+          >
+            {/* Modal Header */}
+            <div className="p-6 bg-gradient-to-r from-[#18A999]/20 via-[#128A7E]/10 to-transparent border-b border-[#18A999]/30">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-[#18A999]/20 border border-[#18A999]/40 rounded-xl text-[#18A999]">
+                  <CheckCircle2 className="w-7 h-7" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-white font-display">
+                    🎉 Booking Confirmed!
+                  </h3>
+                  <p className="text-xs text-emerald-300/90 mt-0.5">
+                    Your room reservation has been successfully stored in Firestore.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-5">
+              {/* Highlight Confirmation Message */}
+              <div className="p-4 bg-[#18A999]/10 border border-[#18A999]/30 rounded-xl text-xs text-slate-200 leading-relaxed font-medium">
+                Your room has been booked successfully. Click <strong className="text-[#18A999]">Add to Google Calendar</strong> to save this meeting to your personal calendar.
+              </div>
+
+              {/* Event Details Grid */}
+              <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
+                <h4 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#18A999]">
+                  Reservation Details Overview
+                </h4>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-500 text-[10px] uppercase font-mono block">Meeting Title</span>
+                    <strong className="text-white font-bold">{successBooking.title}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 text-[10px] uppercase font-mono block">Room & Venue</span>
+                    <strong className="text-[#18A999] font-bold">{successBooking.roomName} ({successBooking.building || 'Main Building'})</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 text-[10px] uppercase font-mono block">Start Time</span>
+                    <strong className="text-slate-200 font-mono">
+                      {new Date(successBooking.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 text-[10px] uppercase font-mono block">End Time</span>
+                    <strong className="text-slate-200 font-mono">
+                      {new Date(successBooking.endTime).toLocaleTimeString([], { timeStyle: 'short' })}
+                    </strong>
+                  </div>
+                  {successBooking.organizer && (
+                    <div>
+                      <span className="text-slate-500 text-[10px] uppercase font-mono block">Organizer</span>
+                      <strong className="text-slate-300">{successBooking.organizer}</strong>
+                    </div>
+                  )}
+                  {successBooking.attendees && successBooking.attendees.length > 0 && (
+                    <div>
+                      <span className="text-slate-500 text-[10px] uppercase font-mono block">Attendees</span>
+                      <strong className="text-slate-300">{successBooking.attendees.join(', ')}</strong>
+                    </div>
+                  )}
+                </div>
+                {successBooking.notes && (
+                  <div className="pt-2 border-t border-slate-800 text-xs">
+                    <span className="text-slate-500 text-[10px] uppercase font-mono block">Agenda / Notes</span>
+                    <p className="text-slate-300 mt-0.5 italic">"{successBooking.notes}"</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-3 pt-2">
+                <button
+                  onClick={() => {
+                    const url = createGoogleCalendarUrl(successBooking);
+                    window.open(url, '_blank');
+                  }}
+                  className="w-full bg-[#18A999] hover:bg-[#159487] text-white font-bold py-3 px-5 rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#18A999]/20 transition-all text-sm"
+                >
+                  <Calendar className="w-4 h-4" />
+                  <span>📅 Add to Google Calendar</span>
+                  <ExternalLink className="w-3.5 h-3.5 ml-1 opacity-80" />
+                </button>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => {
+                      const text = buildMeetingDetailsText(successBooking);
+                      navigator.clipboard.writeText(text);
+                      setCopiedSuccess(true);
+                      setTimeout(() => setCopiedSuccess(false), 3000);
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all text-xs border border-slate-700"
+                  >
+                    {copiedSuccess ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Copy Details</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setSuccessBooking(null)}
+                    className="bg-slate-800/80 hover:bg-slate-800 text-slate-300 font-semibold py-2.5 px-4 rounded-xl cursor-pointer transition-all text-xs border border-slate-800"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
             </div>
           </motion.div>
         </div>

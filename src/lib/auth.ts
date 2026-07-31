@@ -15,6 +15,7 @@ const provider = new GoogleAuthProvider();
 
 // Add all requested Workspace scopes
 provider.addScope('https://www.googleapis.com/auth/calendar');
+provider.addScope('https://www.googleapis.com/auth/calendar.events');
 provider.addScope('https://www.googleapis.com/auth/drive.file');
 provider.addScope('https://www.googleapis.com/auth/gmail.send');
 provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
@@ -95,6 +96,26 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 
     cachedAccessToken = credential.accessToken;
     sessionStorage.setItem('google_workspace_access_token', cachedAccessToken);
+
+    if (result.user) {
+      try {
+        const { doc, setDoc } = await import('firebase/firestore');
+        const { db } = await import('../firebase/firebase');
+        await setDoc(doc(db, 'users', result.user.uid), {
+          googleAccessToken: cachedAccessToken,
+          googleTokenTimestamp: Date.now(),
+          googleConnected: true,
+          calendarConnected: true,
+          email: result.user.email,
+          displayName: result.user.displayName,
+          photoURL: result.user.photoURL,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (fErr) {
+        console.warn('Failed to persist Google token to Firestore:', fErr);
+      }
+    }
+
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     const isStandardSandboxBlock = 
@@ -132,7 +153,25 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  return sessionStorage.getItem('google_workspace_access_token');
+  let token = sessionStorage.getItem('google_workspace_access_token');
+  if (!token && auth.currentUser) {
+    try {
+      const { doc, getDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase/firebase');
+      const docRef = doc(db, 'users', auth.currentUser.uid);
+      const userDoc = await getDoc(docRef);
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        if (data && data.googleAccessToken) {
+          token = data.googleAccessToken;
+          sessionStorage.setItem('google_workspace_access_token', token);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to retrieve Google Access Token from Firestore:', err);
+    }
+  }
+  return token;
 };
 
 export const clearAccessToken = () => {
