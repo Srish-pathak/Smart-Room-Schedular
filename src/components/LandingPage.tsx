@@ -23,7 +23,8 @@ import {
   Layers,
   HelpCircle,
   FileText,
-  Lock
+  Lock,
+  ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Room } from '../types';
@@ -113,7 +114,7 @@ export function LandingPage({
       desc: "Turn tablet screens into interactive digital door plaques showing live status (Available / Occupied) and quick 15-min instant booking."
     },
     {
-      icon: <BarChart3 className="w-6 h-6 text-blue-500" />,
+      icon: <BarChart3 className="w-6 h-6 text-emerald-500" />,
       title: "Department Analytics & Reports",
       desc: "Monitor occupancy rates, peak hours, and room demand with real-time graphs and exportable CSV/PDF audit logs."
     },
@@ -193,49 +194,60 @@ export function LandingPage({
         </div>
       </header>
 
-      {/* HERO SECTION */}
-      <section className="relative pt-16 pb-24 overflow-hidden">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-indigo-600/15 rounded-full blur-[140px] pointer-events-none" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center space-y-8">
-          
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-bold font-mono">
-            <Zap className="w-3.5 h-3.5 text-indigo-400" />
-            <span>V2.5 ENTERPRISE RELEASE • GOOGLE WORKSPACE & FIREBASE POWERED</span>
+      {/* HERO SECTION - IIT (BHU) PORTAL SPACES HERO BANNER */}
+      <section className="relative w-full overflow-hidden bg-[#0a4735] text-white">
+        {/* Background Image with elegant overlay */}
+        <div 
+          className="absolute inset-0 bg-cover bg-center opacity-40 mix-blend-overlay scale-105 transform hover:scale-100 transition-all duration-1000" 
+          style={{ backgroundImage: "url('https://images.unsplash.com/photo-1517502884422-41eaaced0168?auto=format&fit=crop&q=80&w=1600')" }} 
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0a4735] via-[#0a4735]/70 to-[#021f16]" />
+        
+        {/* Grid Pattern overlay for elegant depth */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#dfb9650b_1px,transparent_1px),linear-gradient(to_bottom,#dfb9650b_1px,transparent_1px)] bg-[size:24px_24px]" />
+        
+        <div className="max-w-7xl mx-auto px-6 py-20 md:py-28 relative z-10 space-y-6 text-left">
+          {/* Elegant Breadcrumbs */}
+          <nav className="flex items-center gap-2 text-xs font-mono text-[#dfb965]/90 uppercase tracking-widest">
+            <span>IIT (BHU) Portal</span>
+            <ChevronRight className="w-3.5 h-3.5 text-[#dfb965]/60" />
+            <span>Spaces</span>
+            <ChevronRight className="w-3.5 h-3.5 text-[#dfb965]/60" />
+            <span className="text-white font-bold">Meeting Rooms & Spaces</span>
+          </nav>
+
+          <div className="space-y-4 max-w-3xl">
+            <h1 className="text-4xl sm:text-6xl md:text-7xl font-display font-extrabold tracking-tight text-white leading-tight">
+              Meeting Rooms <br className="hidden sm:inline" />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#dfb965] via-[#f3dfa2] to-[#dfb965]">
+                & Spaces
+              </span>
+            </h1>
+            <p className="text-sm md:text-base text-[#faf8f2]/90 font-serif leading-relaxed font-light max-w-2xl">
+              Welcome to the premium scheduling ecosystem of IIT (BHU) Varanasi. Reserve state-of-the-art boardrooms, fully equipped lecture theaters, and academic presentation spaces tailored to high-profile institute gatherings.
+            </p>
           </div>
 
-          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] max-w-5xl mx-auto">
-            Smart Campus Room Scheduling{' '}
-            <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-indigo-300 bg-clip-text text-transparent">
-              Engineered for Enterprise
-            </span>
-          </h1>
-
-          <p className="text-base sm:text-xl text-slate-400 max-w-3xl mx-auto leading-relaxed font-normal">
-            Eliminate booking conflicts, synchronize Google Calendar & Meet automatically, and optimize academic space utilization across all departments with zero friction.
-          </p>
-
-          <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
+          {/* Action Buttons */}
+          <div className="flex flex-wrap items-center gap-4 pt-4">
             <button
               onClick={onEnterApp}
-              className="px-8 py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-sm uppercase tracking-wider shadow-xl shadow-indigo-600/30 transition-all flex items-center gap-2 cursor-pointer"
+              className="px-8 py-4 bg-[#dfb965] hover:bg-[#d4af37] text-[#0a4735] font-display font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 cursor-pointer flex items-center gap-2"
             >
-              <span>Enter Portal</span>
-              <ArrowRight className="w-5 h-5" />
+              <Calendar className="w-4 h-4" />
+              <span>Book Now</span>
             </button>
-            <a
-              href="#rooms"
-              className={`px-8 py-4 rounded-2xl font-extrabold text-sm uppercase tracking-wider border transition-all ${
-                isDarkMode 
-                  ? 'bg-slate-900/80 border-slate-800 text-slate-200 hover:bg-slate-800' 
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-              }`}
+            <button
+              onClick={onEnterApp}
+              className="px-8 py-4 bg-white/10 hover:bg-white/15 border border-white/20 hover:border-white/35 text-white font-display font-bold text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer flex items-center gap-2"
             >
-              Explore Spaces
-            </a>
+              <Clock className="w-4 h-4 text-[#dfb965]" />
+              <span>Interactive Scheduler</span>
+            </button>
           </div>
 
           {/* METRIC BADGES */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto pt-10">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl pt-10 border-t border-white/10">
             {[
               { label: "Academic Spaces", val: "42+" },
               { label: "Conflict Reduction", val: "99.8%" },
@@ -244,12 +256,10 @@ export function LandingPage({
             ].map((stat, i) => (
               <div 
                 key={i} 
-                className={`p-4 rounded-2xl border text-center ${
-                  isDarkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-                }`}
+                className="p-4 rounded-xl bg-white/5 border border-white/10 text-left backdrop-blur-sm"
               >
-                <div className="text-2xl font-black text-indigo-400 font-mono">{stat.val}</div>
-                <div className="text-xs text-slate-400 font-medium mt-1">{stat.label}</div>
+                <div className="text-2xl font-black text-[#dfb965] font-mono">{stat.val}</div>
+                <div className="text-xs text-white/70 font-medium mt-1">{stat.label}</div>
               </div>
             ))}
           </div>

@@ -803,7 +803,7 @@ export const UserProfileView = ({
                   {myFeedback.map((ticket) => {
                     const statusColors: Record<string, string> = {
                       pending: 'bg-yellow-500/15 border-yellow-500 text-yellow-500',
-                      in_progress: 'bg-blue-500/15 border-blue-400 text-blue-400',
+                      in_progress: 'bg-emerald-500/15 border-emerald-400 text-emerald-400',
                       resolved: 'bg-emerald-500/15 border-emerald-500 text-emerald-400',
                     };
                     const priorityLabels: Record<string, string> = {

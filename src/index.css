@@ -2,95 +2,100 @@
 @import "tailwindcss";
 
 :root {
-  /* Modern Teal Color Palette */
-  --teal-primary: #18A999;
-  --teal-dark: #128A7E;
-  --teal-hover: #159487;
-  --teal-light: #EAF8F6;
+  /* Google / Notion / Bookings SaaS Color Palette - Uniform Green Theme */
+  --brand-primary: #10B981;
+  --brand-hover: #059669;
+  --brand-light: #ECFDF5;
+  --brand-border: #A7F3D0;
   --page-bg: #F8FAFC;
   --card-bg: #FFFFFF;
-  --border-color: #E5E7EB;
-  --text-dark: #111827;
+  --border-color: #E2E8F0;
+  --text-dark: #1E293B;
+  --text-muted: #64748B;
 
-  /* Mapped Tailwind Indigo / Accent scale to Modern Teal */
-  --indigo-50: #EAF8F6;     /* Light Background */
-  --indigo-100: #D1F2ED;    /* Soft teal background */
-  --indigo-200: #A3E5DC;    /* Light teal border/chip */
-  --indigo-300: #52C8BB;    /* Vibrant teal accent */
-  --indigo-400: #18A999;    /* Primary Teal */
-  --indigo-500: #159487;    /* Hover Teal */
-  --indigo-600: #128A7E;    /* Dark Teal */
-  --indigo-700: #0E6E64;    /* Deep Teal */
-  --indigo-800: #0B534B;    /* Darkest Teal */
-  --indigo-900: #073B35;    /* Very Deep Teal */
-  --indigo-950: #042320;    /* Teal Shadow / Dark Accent */
+  --success-color: #10B981;
+  --warning-color: #F59E0B;
+  --error-color: #EF4444;
 
-  --violet-50: #EAF8F6;
-  --violet-100: #D1F2ED;
-  --violet-200: #A3E5DC;
-  --violet-300: #52C8BB;
-  --violet-400: #18A999;
-  --violet-500: #159487;
-  --violet-600: #128A7E;
-  --violet-700: #0E6E64;
-  --violet-800: #0B534B;
-  --violet-900: #073B35;
-  --violet-950: #042320;
+  /* Mapped Tailwind Indigo / Accent scale to Uniform Green #10B981 */
+  --indigo-50: #ECFDF5;     /* Light Green Background */
+  --indigo-100: #D1FAE5;    /* Soft green background */
+  --indigo-200: #A7F3D0;    /* Light green border/chip */
+  --indigo-300: #6EE7B7;    /* Accent green */
+  --indigo-400: #34D399;    /* Medium green */
+  --indigo-500: #10B981;    /* Primary Brand Green */
+  --indigo-600: #059669;    /* Hover Green */
+  --indigo-700: #047857;    /* Dark Green */
+  --indigo-800: #065F46;    /* Deep Green */
+  --indigo-900: #064E3B;    /* Darkest Green */
+  --indigo-950: #022C22;    /* Shadow */
 
-  /* Neutrals mapped to clean, high-contrast Slate / Gray */
-  --slate-50: #111827;      /* Text dark */
-  --slate-100: #1F2937;     /* Subtext dark */
-  --slate-200: #374151;     /* Text medium */
-  --slate-300: #4B5563;     /* Muted text */
-  --slate-400: #6B7280;     /* Inactive label */
-  --slate-500: #18A999;     /* Primary indicator */
-  --slate-600: #128A7E;     /* Dark teal accent */
-  --slate-700: #1F2937;
-  --slate-750: #E5E7EB;     /* Borders */
-  --slate-800: #F3F4F6;     /* Light gray card track */
-  --slate-850: #EAF8F6;     /* Light teal card track */
+  --violet-50: #ECFDF5;
+  --violet-100: #D1FAE5;
+  --violet-200: #A7F3D0;
+  --violet-300: #6EE7B7;
+  --violet-400: #34D399;
+  --violet-500: #10B981;
+  --violet-600: #059669;
+  --violet-700: #047857;
+  --violet-800: #065F46;
+  --violet-900: #064E3B;
+  --violet-950: #022C22;
+
+  /* Neutrals mapped to crisp, high-contrast Light Slate / Gray */
+  --slate-50: #1E293B;      /* Primary Text dark */
+  --slate-100: #334155;     /* Secondary Text */
+  --slate-200: #475569;     /* Muted Text */
+  --slate-300: #64748B;     /* Inactive Text */
+  --slate-400: #94A3B8;     /* Subtle border/icon */
+  --slate-500: #10B981;     /* Primary indicator */
+  --slate-600: #059669;     /* Hover primary */
+  --slate-700: #334155;
+  --slate-750: #E2E8F0;     /* Borders */
+  --slate-800: #F1F5F9;     /* Light gray card track */
+  --slate-850: #ECFDF5;     /* Light brand track */
   --slate-900: #FFFFFF;     /* Cards background */
   --slate-950: #F8FAFC;     /* Page background */
 
-  --text-main: #111827;
+  --text-main: #1E293B;
 }
 
 html.dark {
-  /* Dark Mode Overrides for Modern Teal */
+  /* Dark Mode Overrides */
   --slate-50: #F8FAFC;      /* High contrast headings */
   --slate-100: #F1F5F9;     /* Light subtext */
   --slate-200: #E2E8F0;     /* Secondary text */
   --slate-300: #CBD5E1;     /* Body text */
   --slate-400: #94A3B8;     /* Muted text */
-  --slate-500: #18A999;     /* Teal primary */
-  --slate-600: #159487;     /* Teal hover */
+  --slate-500: #10B981;     /* Primary */
+  --slate-600: #059669;     /* Hover */
   --slate-700: #0F172A;     /* Background dark */
   --slate-750: #1E293B;     /* Border dark */
-  --slate-800: #112926;     /* Muted panel dark */
-  --slate-850: #0A1E1C;     /* Track dark */
-  --slate-900: #0F2321;     /* Card background dark */
-  --slate-950: #081615;     /* Page background dark */
+  --slate-800: #1E293B;     /* Muted panel dark */
+  --slate-850: #0F172A;     /* Track dark */
+  --slate-900: #1E293B;     /* Card background dark */
+  --slate-950: #0F172A;     /* Page background dark */
 
-  --indigo-50: #042320;
-  --indigo-100: #073B35;
-  --indigo-200: #0E6E64;
-  --indigo-300: #128A7E;
-  --indigo-400: #18A999;
-  --indigo-500: #159487;
-  --indigo-600: #18A999;
-  --indigo-700: #EAF8F6;
+  --indigo-50: #1E293B;
+  --indigo-100: #334155;
+  --indigo-200: #475569;
+  --indigo-300: #64748B;
+  --indigo-400: #34D399;
+  --indigo-500: #10B981;
+  --indigo-600: #059669;
+  --indigo-700: #D1FAE5;
   --indigo-800: #FFFFFF;
   --indigo-900: #FFFFFF;
   --indigo-950: #FFFFFF;
 
-  --violet-50: #042320;
-  --violet-100: #073B35;
-  --violet-200: #0E6E64;
-  --violet-300: #128A7E;
-  --violet-400: #18A999;
-  --violet-500: #159487;
-  --violet-600: #18A999;
-  --violet-700: #EAF8F6;
+  --violet-50: #1E293B;
+  --violet-100: #334155;
+  --violet-200: #475569;
+  --violet-300: #64748B;
+  --violet-400: #34D399;
+  --violet-500: #10B981;
+  --violet-600: #059669;
+  --violet-700: #D1FAE5;
   --violet-800: #FFFFFF;
   --violet-900: #FFFFFF;
   --violet-950: #FFFFFF;
@@ -128,6 +133,18 @@ html.dark {
   --color-violet-800: var(--violet-800);
   --color-violet-900: var(--violet-900);
   --color-violet-950: var(--violet-950);
+
+  --color-blue-50: var(--indigo-50);
+  --color-blue-100: var(--indigo-100);
+  --color-blue-200: var(--indigo-200);
+  --color-blue-300: var(--indigo-300);
+  --color-blue-400: var(--indigo-400);
+  --color-blue-500: var(--indigo-500);
+  --color-blue-600: var(--indigo-600);
+  --color-blue-700: var(--indigo-700);
+  --color-blue-800: var(--indigo-800);
+  --color-blue-900: var(--indigo-900);
+  --color-blue-950: var(--indigo-950);
 
   --color-slate-50: var(--slate-50);
   --color-slate-100: var(--slate-100);

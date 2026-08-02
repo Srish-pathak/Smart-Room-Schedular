@@ -19,7 +19,8 @@ import {
   Edit2,
   Copy,
   CheckCircle2,
-  Share2
+  Share2,
+  QrCode
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -53,6 +54,7 @@ export default function CalendarWidget({
 
   // Success Confirmation Modal State
   const [successBooking, setSuccessBooking] = useState<{
+    id?: string;
     title: string;
     roomName: string;
     building?: string;
@@ -1693,6 +1695,27 @@ export default function CalendarWidget({
                     <p className="text-slate-300 mt-0.5 italic">"{successBooking.notes}"</p>
                   </div>
                 )}
+              </div>
+
+              {/* QR Code Pass Card */}
+              <div className="p-3.5 bg-slate-950 border border-[#18A999]/30 rounded-xl flex items-center gap-4">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(`IIT BHU Smart Room Booking Pass\nTitle: ${successBooking.title}\nRoom: ${successBooking.roomName}\nTime: ${new Date(successBooking.startTime).toLocaleString()} - ${new Date(successBooking.endTime).toLocaleTimeString()}\nOrganizer: ${successBooking.organizer || 'User'}`)}`}
+                  alt="Booking Verification QR Code"
+                  referrerPolicy="no-referrer"
+                  className="w-20 h-20 rounded-lg border border-slate-800 bg-white p-1 shrink-0"
+                />
+                <div className="space-y-1 text-left">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#18A999] flex items-center gap-1">
+                    <QrCode className="w-3.5 h-3.5" /> Official Access Pass QR
+                  </span>
+                  <p className="text-xs text-slate-300 font-medium">
+                    Scan at room terminal or present to department admin for instant verification.
+                  </p>
+                  <p className="text-[10px] text-slate-500 font-mono">
+                    ID: {successBooking.id ? successBooking.id.slice(0, 12) + '...' : 'IITBHU-CONFIRMED'}
+                  </p>
+                </div>
               </div>
 
               {/* Action Buttons */}

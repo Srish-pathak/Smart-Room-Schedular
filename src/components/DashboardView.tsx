@@ -266,52 +266,67 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {availableRooms.slice(0, 3).map(({ room, statusInfo }) => (
                 <div 
                   key={room.id}
-                  className={`border p-4.5 rounded-2xl flex flex-col justify-between transition-all hover:scale-[1.01] ${
+                  className={`border rounded-2xl overflow-hidden flex flex-col justify-between transition-all duration-300 hover:shadow-xl hover:-translate-y-1 ${
                     isDarkMode 
-                      ? 'bg-slate-900 border-slate-800/80 hover:border-indigo-500/30' 
-                      : 'bg-white border-stone-200 shadow-sm hover:border-emerald-500/30'
+                      ? 'bg-slate-900 border-slate-800 hover:border-emerald-500/40' 
+                      : 'bg-white border-stone-200 shadow-sm hover:border-emerald-500/40'
                   }`}
                 >
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <span className="text-[9px] font-bold font-mono text-slate-500 uppercase block">
-                          {room.building || 'IIT BHU'}
-                        </span>
-                        <strong className={`text-sm font-extrabold block truncate ${isDarkMode ? 'text-white' : 'text-slate-850'}`}>
-                          {room.name}
-                        </strong>
-                      </div>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 font-bold shrink-0">
-                        Vacant
+                  <div className="relative h-28 overflow-hidden bg-slate-850">
+                    <img
+                      src={room.image || 'https://images.unsplash.com/photo-1517502884422-41eaaced0168?auto=format&fit=crop&q=80&w=600'}
+                      alt={room.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent" />
+                    <span className="absolute top-2.5 right-2.5 text-[9px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/90 text-white font-bold backdrop-blur-sm shadow-sm flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                      Vacant
+                    </span>
+                    {room.category && (
+                      <span className="absolute bottom-2 left-2.5 text-[9px] font-mono font-bold px-2 py-0.5 rounded-md bg-slate-950/80 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider backdrop-blur-sm">
+                        {room.category}
                       </span>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-[11px] text-slate-400">
-                      <span className="flex items-center gap-1 font-mono">
-                        <Users className="w-3.5 h-3.5 text-slate-500" />
-                        Capacity {room.capacity}
-                      </span>
-                    </div>
+                    )}
                   </div>
 
-                  <div className="mt-4 pt-3.5 border-t border-slate-850/60 flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => onSelectRoomForDetails(room)}
-                      className="text-xs text-slate-400 hover:text-slate-350 underline cursor-pointer"
-                    >
-                      Details
-                    </button>
-                    <button
-                      onClick={() => onBookRoom(room)}
-                      className={`px-3 py-1.5 rounded-lg text-[10px] font-extrabold uppercase tracking-wider cursor-pointer ${
-                        isDarkMode 
-                          ? 'bg-indigo-600 hover:bg-indigo-500 text-white' 
-                          : 'bg-[#0a4735] hover:bg-[#063325] text-white'
-                      }`}
-                    >
-                      Book Now
-                    </button>
+                  <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-bold font-mono text-slate-500 uppercase block">
+                        {room.building || 'IIT BHU Campus'}
+                      </span>
+                      <strong className={`text-sm font-extrabold block truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                        {room.name}
+                      </strong>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                      <span className="flex items-center gap-1">
+                        <Users className="w-3.5 h-3.5 text-emerald-500" />
+                        Cap: <strong className={isDarkMode ? 'text-slate-200' : 'text-slate-800'}>{room.capacity} seats</strong>
+                      </span>
+                      {room.features && room.features.length > 0 && (
+                        <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-300 border border-slate-700/50 truncate max-w-[100px]" title={room.features.join(', ')}>
+                          {room.features[0]}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-800/40 flex items-center justify-between gap-2 mt-auto">
+                      <button
+                        onClick={() => onSelectRoomForDetails(room)}
+                        className="text-xs text-slate-400 hover:text-slate-200 font-medium transition-colors cursor-pointer"
+                      >
+                        Details
+                      </button>
+                      <button
+                        onClick={() => onBookRoom(room)}
+                        className="px-3.5 py-1.5 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer bg-[#0a4735] hover:bg-[#063325] text-white shadow-md shadow-emerald-950/20 hover:scale-105 active:scale-95 flex items-center gap-1"
+                      >
+                        <Calendar className="w-3 h-3 text-[#dfb965]" />
+                        <span>Book Now</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
