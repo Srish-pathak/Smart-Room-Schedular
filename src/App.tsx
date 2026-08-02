@@ -1669,10 +1669,15 @@ export default function App() {
 
                   <button
                     onClick={() => setShowAssistantModal(true)}
-                    className="w-full flex items-center gap-3 font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer text-purple-400 hover:bg-purple-950/20"
+                    className="w-full flex items-center justify-between font-semibold text-xs py-3 px-3.5 rounded-xl transition-all cursor-pointer text-purple-400 hover:bg-purple-950/20"
                   >
-                    <Sparkles className="w-4 h-4 shrink-0 text-purple-400" />
-                    <span>AI Room Allocator</span>
+                    <div className="flex items-center gap-3">
+                      <Sparkles className="w-4 h-4 shrink-0 text-purple-400" />
+                      <span>AI Room Allocator</span>
+                    </div>
+                    <span className="text-[9px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                      <span>🎙️ Voice</span>
+                    </span>
                   </button>
 
                   <button

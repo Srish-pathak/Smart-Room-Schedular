@@ -1,7 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Room } from '../types';
-import { Sparkles, Users, CheckCircle2, Building2, ArrowRight, X, Loader2, Cpu, Sliders, AlertCircle } from 'lucide-react';
+import { Sparkles, Users, CheckCircle2, Building2, ArrowRight, X, Loader2, Cpu, Sliders, AlertCircle, Mic, MicOff, Volume2, Radio } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+// Declaration for Web Speech API
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
 
 interface SmartAIRoomAssistantProps {
   rooms: Room[];
@@ -20,6 +28,9 @@ export function SmartAIRoomAssistant({
   const [headcount, setHeadcount] = useState<number>(25);
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>(['Air Conditioning', 'Projector']);
   const [isLoading, setIsLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [speechError, setSpeechError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     recommendedRoom: Room | null;
     reasoning: string;
@@ -27,7 +38,135 @@ export function SmartAIRoomAssistant({
     matchScore: number;
   } | null>(null);
 
+  const recognitionRef = useRef<any>(null);
+
   const availableFeatures = ['Air Conditioning', 'Projector', 'Smart Board', 'Wheelchair Accessible', 'Audio System', 'Live Streaming'];
+
+  // Smart Speech Natural Language Parser
+  const parseSpokenText = (spokenText: string) => {
+    const lower = spokenText.toLowerCase();
+
+    // 1. Extract Headcount
+    const headcountMatch = 
+      lower.match(/(?:for|capacity|headcount|seats?|around|about|with|need)\s+(\d{1,3})/i) ||
+      lower.match(/\b(\d{1,3})\s*(?:people|students|professors|attendees|faculty|seats|persons)\b/i);
+    
+    if (headcountMatch && headcountMatch[1]) {
+      const num = parseInt(headcountMatch[1], 10);
+      if (!isNaN(num) && num >= 5 && num <= 300) {
+        setHeadcount(num);
+      }
+    }
+
+    // 2. Extract Amenity Keywords
+    const newFeatures: string[] = [];
+    if (lower.includes('ac') || lower.includes('air condition') || lower.includes('cooling')) {
+      newFeatures.push('Air Conditioning');
+    }
+    if (lower.includes('projector') || lower.includes('presentation') || lower.includes('screen')) {
+      newFeatures.push('Projector');
+    }
+    if (lower.includes('smart board') || lower.includes('smartboard') || lower.includes('digital board')) {
+      newFeatures.push('Smart Board');
+    }
+    if (lower.includes('wheelchair') || lower.includes('handicap') || lower.includes('accessible')) {
+      newFeatures.push('Wheelchair Accessible');
+    }
+    if (lower.includes('audio') || lower.includes('sound') || lower.includes('mic') || lower.includes('speaker')) {
+      newFeatures.push('Audio System');
+    }
+    if (lower.includes('stream') || lower.includes('live') || lower.includes('hybrid')) {
+      newFeatures.push('Live Streaming');
+    }
+
+    if (newFeatures.length > 0) {
+      setSelectedFeatures(prev => Array.from(new Set([...prev, ...newFeatures])));
+    }
+  };
+
+  // Toggle Voice Recognition
+  const toggleListening = () => {
+    setSpeechError(null);
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setSpeechError('Web Speech API is not supported in this browser. Please type your prompt.');
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      setInterimTranscript('');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setSpeechError(null);
+      };
+
+      recognition.onresult = (event: any) => {
+        let currentInterim = '';
+        let finalTrans = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTrans += event.results[i][0].transcript;
+          } else {
+            currentInterim += event.results[i][0].transcript;
+          }
+        }
+
+        if (finalTrans) {
+          const cleanedText = finalTrans.trim();
+          setPrompt(prev => prev ? `${prev} ${cleanedText}` : cleanedText);
+          parseSpokenText(cleanedText);
+        }
+
+        setInterimTranscript(currentInterim);
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn('Speech recognition error:', event.error);
+        if (event.error === 'not-allowed') {
+          setSpeechError('Microphone access denied. Please allow microphone permissions in your browser.');
+        } else if (event.error !== 'no-speech') {
+          setSpeechError(`Voice error: ${event.error}`);
+        }
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        setInterimTranscript('');
+      };
+
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch (err: any) {
+      console.error('Failed to start speech recognition:', err);
+      setSpeechError('Could not access microphone.');
+      setIsListening(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
 
   const toggleFeature = (feat: string) => {
     setSelectedFeatures(prev => 
@@ -139,18 +278,113 @@ export function SmartAIRoomAssistant({
           </div>
         </div>
 
-        {/* Natural Language Prompt */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-bold text-slate-400">Custom Prompt / Details</label>
-          <textarea
-            rows={2}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="E.g. We need a modern hall in Main Building for a PhD thesis defense tomorrow afternoon..."
-            className={`w-full p-3.5 rounded-2xl border text-xs outline-none focus:ring-2 focus:ring-purple-500 transition-all ${
-              isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
-            }`}
-          />
+        {/* Natural Language Prompt & Voice Input Controls */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+              <span>Custom Prompt / Details</span>
+            </label>
+            
+            <button
+              type="button"
+              onClick={toggleListening}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                isListening
+                  ? 'bg-rose-500 text-white border-rose-400 shadow-lg shadow-rose-500/30 animate-pulse'
+                  : isDarkMode
+                    ? 'bg-purple-600/20 border-purple-500/40 text-purple-300 hover:bg-purple-600/30'
+                    : 'bg-purple-100 border-purple-300 text-purple-800 hover:bg-purple-200'
+              }`}
+            >
+              {isListening ? (
+                <>
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
+                  </span>
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>Listening... Stop</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-3.5 h-3.5 text-purple-400" />
+                  <span>🎙️ Voice Input</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Voice Input Active Visual Banner */}
+          {isListening && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="p-3 rounded-2xl bg-gradient-to-r from-rose-950/80 via-purple-950/80 to-slate-950 border border-rose-500/40 text-xs space-y-2"
+            >
+              <div className="flex items-center justify-between text-rose-300 font-bold">
+                <div className="flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-rose-400 animate-pulse" />
+                  <span>Voice Recognition Active</span>
+                </div>
+                <span className="text-[10px] font-mono bg-rose-500/20 px-2 py-0.5 rounded text-rose-300">
+                  Speak clearly into microphone
+                </span>
+              </div>
+
+              {/* Sound Wave Animation */}
+              <div className="flex items-center justify-center gap-1 py-1">
+                <span className="w-1 h-4 bg-rose-400 rounded-full animate-bounce [animation-delay:-0.4s]" />
+                <span className="w-1 h-6 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.2s]" />
+                <span className="w-1 h-8 bg-indigo-400 rounded-full animate-bounce" />
+                <span className="w-1 h-5 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1 h-3 bg-rose-400 rounded-full animate-bounce [animation-delay:-0.1s]" />
+              </div>
+
+              {interimTranscript && (
+                <p className="text-slate-300 italic font-serif text-[11px] bg-black/40 p-2 rounded-xl border border-rose-500/20">
+                  "{interimTranscript}..."
+                </p>
+              )}
+
+              <p className="text-[10px] text-slate-400 font-mono">
+                💡 Tip: Say "Book a hall for 50 people with Projector and AC" to auto-fill headcount and amenities!
+              </p>
+            </motion.div>
+          )}
+
+          {speechError && (
+            <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{speechError}</span>
+            </div>
+          )}
+
+          <div className="relative">
+            <textarea
+              rows={2}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="E.g. We need a modern hall in Main Building for a PhD thesis defense tomorrow afternoon... Or click 'Voice Input' above to speak!"
+              className={`w-full p-3.5 pr-12 rounded-2xl border text-xs outline-none focus:ring-2 focus:ring-purple-500 transition-all ${
+                isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+              }`}
+            />
+            <button
+              type="button"
+              onClick={toggleListening}
+              title={isListening ? "Stop voice input" : "Start voice input"}
+              className={`absolute right-3 top-3 p-2 rounded-xl transition-all cursor-pointer ${
+                isListening 
+                  ? 'bg-rose-500 text-white animate-bounce' 
+                  : isDarkMode
+                    ? 'text-purple-400 hover:bg-slate-800 hover:text-white'
+                    : 'text-purple-600 hover:bg-slate-200'
+              }`}
+            >
+              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
 
         {/* Headcount Slider */}
