@@ -29,7 +29,8 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow read, write: if true; // Allows notifications alerts dispatching and clearing
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
     match /audit_logs/{logId} {

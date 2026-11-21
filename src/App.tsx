@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from './auth/useAuth';
 import { Room } from './types';
-import { FloorPlanView } from './components/FloorPlanView';
 import {
   authAPI,
   roomsAPI,
@@ -17,23 +16,32 @@ import { db } from './firebase/firebase';
 
 // Components
 import { CalendarAPI } from './lib/workspace';
-import CalendarWidget from './components/CalendarWidget';
 import { LoginView } from './components/LoginView';
 import { ConfirmModal } from './components/ConfirmModal';
-import { ActivityHistoryDrawer } from './components/ActivityHistoryDrawer';
-import { RoomDetailsDrawer } from './components/RoomDetailsDrawer';
-import { AdminPanel } from './components/AdminPanel';
 import { DashboardView } from './components/DashboardView';
-import { UserProfileView } from './components/UserProfileView';
-import { RoomsDirectoryView } from './components/RoomsDirectoryView';
 import { LandingPage } from './components/LandingPage';
-import { DigitalDisplayView } from './components/DigitalDisplayView';
-import { SmartAIRoomAssistant } from './components/SmartAIRoomAssistant';
-import { ReportExportModal } from './components/ReportExportModal';
 import { NotificationFeed } from './components/NotificationFeed';
-import { OnboardingTour } from './components/OnboardingTour';
-import { HelpSupportModal } from './components/HelpSupportModal';
 import { calculateRoomStatus } from './utils/roomStatus';
+
+// Code-split heavy views to optimize initial bundle size
+const CalendarWidget = React.lazy(() => import('./components/CalendarWidget'));
+const AdminPanel = React.lazy(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel })));
+const RoomsDirectoryView = React.lazy(() => import('./components/RoomsDirectoryView').then(m => ({ default: m.RoomsDirectoryView })));
+const UserProfileView = React.lazy(() => import('./components/UserProfileView').then(m => ({ default: m.UserProfileView })));
+const DigitalDisplayView = React.lazy(() => import('./components/DigitalDisplayView').then(m => ({ default: m.DigitalDisplayView })));
+const SmartAIRoomAssistant = React.lazy(() => import('./components/SmartAIRoomAssistant').then(m => ({ default: m.SmartAIRoomAssistant })));
+const ReportExportModal = React.lazy(() => import('./components/ReportExportModal').then(m => ({ default: m.ReportExportModal })));
+const ActivityHistoryDrawer = React.lazy(() => import('./components/ActivityHistoryDrawer').then(m => ({ default: m.ActivityHistoryDrawer })));
+const RoomDetailsDrawer = React.lazy(() => import('./components/RoomDetailsDrawer').then(m => ({ default: m.RoomDetailsDrawer })));
+const OnboardingTour = React.lazy(() => import('./components/OnboardingTour').then(m => ({ default: m.OnboardingTour })));
+const HelpSupportModal = React.lazy(() => import('./components/HelpSupportModal').then(m => ({ default: m.HelpSupportModal })));
+
+const ModuleLoadingFallback = () => (
+  <div className="flex flex-col items-center justify-center p-12 min-h-[300px] w-full">
+    <div className="w-9 h-9 border-3 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mb-3" />
+    <span className="text-xs font-semibold text-slate-400 font-mono tracking-wider uppercase">Loading Workspace Module...</span>
+  </div>
+);
 
 // Icons
 import {
@@ -1823,6 +1831,7 @@ export default function App() {
                 transition={{ duration: 0.2 }}
                 className="w-full"
               >
+              <React.Suspense fallback={<ModuleLoadingFallback />}>
               {/* ==========================================
                   TAB: LANDING PAGE
                   ========================================== */}
@@ -1949,8 +1958,7 @@ export default function App() {
                 />
               )}
 
-
-
+              </React.Suspense>
             </motion.div>
             </div>
           </AnimatePresence>
@@ -2037,6 +2045,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* DYNAMIC ACTIVITY HISTORY DRAWER */}
+      <React.Suspense fallback={null}>
       <ActivityHistoryDrawer
         selectedRoomForHistory={selectedRoomForHistory}
         onClose={() => {
@@ -2121,6 +2130,7 @@ export default function App() {
         onRestartTour={() => setShowOnboardingTour(true)}
         isDarkMode={isDarkMode}
       />
+      </React.Suspense>
 
       {/* Footer Branding */}
       <footer className="py-6 border-t border-slate-900/80 mt-12 bg-slate-900/40">
