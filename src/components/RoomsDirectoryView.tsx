@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Room, Booking } from '../types';
 import { FloorPlanView } from './FloorPlanView';
-import { CalendarAPI } from '../lib/workspace';
+import { GoogleCalendarService } from '../services/GoogleCalendarService';
 import { bookingsAPI } from '../lib/api';
 import { calculateRoomStatus } from '../utils/roomStatus';
 import { motion, AnimatePresence } from 'motion/react';
@@ -481,7 +481,7 @@ export function RoomsDirectoryView({
                               }
                               try {
                                 addToast('Initiating Google Calendar Sync...', 'info');
-                                const calEvent = await CalendarAPI.createEvent({
+                                const calEvent = await GoogleCalendarService.createEvent({
                                   roomName: b.room_name || b.roomName,
                                   summary: b.summary,
                                   startTime: b.start_time || b.startTime,
@@ -566,7 +566,7 @@ export function RoomsDirectoryView({
                               const gToken = sessionStorage.getItem('google_workspace_access_token');
                               if (gToken && b.google_event_id) {
                                 try {
-                                  await CalendarAPI.deleteEvent(b.google_event_id);
+                                  await GoogleCalendarService.deleteEvent(b.google_event_id);
                                 } catch (calErr) {
                                   console.error('Failed to cancel Google Calendar event:', calErr);
                                 }

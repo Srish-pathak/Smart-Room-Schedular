@@ -87,25 +87,6 @@ export interface WaitlistEntry {
   createdAt: string;
 }
 
-export interface DriveFile {
-  id: string;
-  name: string;
-  mimeType: string;
-  webViewLink?: string;
-}
-
-export interface ChatSpace {
-  name: string;
-  displayName: string;
-  type: string;
-}
-
-export interface FormMetadata {
-  formId: string;
-  title: string;
-  description?: string;
-}
-
 export interface User {
   id: string;
   name: string;

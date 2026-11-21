@@ -16,7 +16,7 @@ import {
 import { Room, Booking, User } from '../types';
 import { roomsAPI, adminAPI, bookingsAPI, auditAPI, defaultIITBHURooms } from '../lib/api';
 import { ALL_IITBHU_DEPARTMENTS } from '../firebase/seedRooms';
-import { CalendarAPI } from '../lib/workspace';
+import { GoogleCalendarService } from '../services/GoogleCalendarService';
 import { DashboardStats } from './DashboardStats';
 
 interface AdminPanelProps {
@@ -943,7 +943,7 @@ export function AdminPanel({
                             }
                             try {
                               addToast('Initiating Google Calendar Sync...', 'info');
-                              const calEvent = await CalendarAPI.createEvent({
+                              const calEvent = await GoogleCalendarService.createEvent({
                                 roomName: b.room_name,
                                 summary: b.summary,
                                 startTime: b.start_time,
@@ -1026,7 +1026,7 @@ export function AdminPanel({
                           const gToken = sessionStorage.getItem('google_workspace_access_token');
                           if (gToken && b.google_event_id) {
                             try {
-                              await CalendarAPI.deleteEvent(b.google_event_id);
+                              await GoogleCalendarService.deleteEvent(b.google_event_id);
                             } catch (calErr) {
                               console.error('Failed to cancel Google Calendar event:', calErr);
                             }

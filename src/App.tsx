@@ -15,7 +15,6 @@ import { collection, onSnapshot, getDocs, query, limit } from 'firebase/firestor
 import { db } from './firebase/firebase';
 
 // Components
-import { CalendarAPI } from './lib/workspace';
 import { LoginView } from './components/LoginView';
 import { ConfirmModal } from './components/ConfirmModal';
 import { DashboardView } from './components/DashboardView';
