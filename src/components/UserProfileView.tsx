@@ -608,8 +608,8 @@ export const UserProfileView = ({
           }`}>
             <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5 text-indigo-400" />
             <div className="text-xs leading-relaxed text-left">
-              <p className="font-bold">IIT BHU Preview: Student Submissions Enabled</p>
-              <p className="opacity-80">In production, maintenance tickets are restricted to Faculty/Admins. In this workspace preview, student-level feedback has been unlocked so you can fully test this component.</p>
+              <p className="font-bold">IIT BHU Campus Maintenance & Support</p>
+              <p className="opacity-80">Submit maintenance requests, hardware malfunction reports, or room feedback directly to campus facility management.</p>
             </div>
           </div>
         )}

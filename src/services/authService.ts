@@ -58,17 +58,12 @@ export const authService = {
         // Update Firebase Auth display name
         await updateProfile(user, { displayName: fullName });
       } catch (fbError: any) {
-        if (fbError.code === 'auth/network-request-failed' || fbError.message?.includes('network-request-failed')) {
-          console.warn('Network request failed during sign up. Bypassing with offline sandbox credential.');
-          const mockUid = 'offline-' + btoa(lowerEmail).replace(/=/g, '');
-          user = {
-            uid: mockUid,
-            displayName: fullName,
-            email: lowerEmail,
-            emailVerified: true,
-            photoURL: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(fullName)}`
-          } as any;
-          emailVerified = true;
+        if (fbError.code === 'auth/email-already-in-use') {
+          throw new Error('An account already exists with this email address.');
+        } else if (fbError.code === 'auth/weak-password') {
+          throw new Error('Password should be at least 6 characters long.');
+        } else if (fbError.code === 'auth/network-request-failed' || fbError.message?.includes('network-request-failed')) {
+          throw new Error('Network error: Unable to reach authentication server. Please check your internet connection.');
         } else {
           throw fbError;
         }
@@ -93,7 +88,7 @@ export const authService = {
       }
 
       // 3. Send email verification
-      if (user.uid && !user.uid.startsWith('offline-')) {
+      if (user && user.email) {
         try {
           await fbSendVerification(user);
         } catch (verifyErr) {
@@ -135,72 +130,16 @@ export const authService = {
       try {
         userCredential = await fbSignIn(auth, email, password);
       } catch (fbError: any) {
-        // Handle auth/network-request-failed gracefully
         if (fbError.code === 'auth/network-request-failed' || fbError.message?.includes('network-request-failed')) {
-          console.warn('Network request failed during sign in. Bypassing with offline sandbox credential.');
-          const mockUid = 'offline-' + btoa(lowerEmail).replace(/=/g, '');
-          const fullName = lowerEmail.includes('admin') ? 'Prof. Rajeev (Admin)' : (lowerEmail.includes('faculty') ? 'Prof. Amit (Faculty)' : 'Abishek (User)');
-          const role: 'student' | 'faculty' | 'admin' = lowerEmail.includes('admin') ? 'admin' : (lowerEmail.includes('faculty') ? 'faculty' : 'student');
-          
-          const userProfile: UserProfile = {
-            uid: mockUid,
-            fullName,
-            email: lowerEmail,
-            role,
-            profilePhoto: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(fullName)}`,
-            createdAt: new Date().toISOString(),
-            lastLogin: new Date().toISOString(),
-            isVerified: true
-          };
-
-          const localToken = btoa(JSON.stringify({
-            uid: mockUid,
-            id: mockUid,
-            fullName,
-            name: fullName,
-            email: lowerEmail,
-            role,
-            isVerified: true
-          }));
-          setSessionToken(localToken, rememberMe);
-
-          return {
-            firebaseUser: {
-              uid: mockUid,
-              displayName: fullName,
-              email: lowerEmail,
-              emailVerified: true,
-              photoURL: userProfile.profilePhoto
-            } as any,
-            userProfile,
-            syncResponse: { token: localToken, user: userProfile }
-          };
-        }
-
-        // Auto-onboard/register if the user does not exist or if we get invalid-credential
-        const isAutoRegAllowed = 
-          lowerEmail === 'admin@iitbhu.ac.in' || 
-          lowerEmail === 'student@iitbhu.ac.in' ||
+          throw new Error('Network error: Unable to reach authentication server. Please check your internet connection.');
+        } else if (
           fbError.code === 'auth/user-not-found' ||
-          fbError.code === 'auth/invalid-credential' ||
-          fbError.message?.includes('user-not-found') ||
-          fbError.message?.includes('invalid-credential');
-
-        if (isAutoRegAllowed) {
-          try {
-            console.info('Attempting seamless auto-registration in authService:', email);
-            const name = lowerEmail.includes('admin') ? 'Prof. Rajeev (Admin)' : (lowerEmail.includes('faculty') ? 'Prof. Amit (Faculty)' : 'Abishek (User)');
-            const signUpCredential = await fbCreateUser(auth, email, password);
-            const newUser = signUpCredential.user;
-            await updateProfile(newUser, { displayName: name });
-            userCredential = signUpCredential;
-          } catch (signUpError: any) {
-            // If email already in use, then the user has a registered password, so the error was just incorrect password
-            if (signUpError.code === 'auth/email-already-in-use') {
-              throw new Error('Incorrect password for this registered email coordinates.');
-            }
-            throw signUpError;
-          }
+          fbError.code === 'auth/wrong-password' ||
+          fbError.code === 'auth/invalid-credential'
+        ) {
+          throw new Error('Invalid email or password.');
+        } else if (fbError.code === 'auth/too-many-requests') {
+          throw new Error('Too many failed attempts. Access temporarily disabled. Please try again later.');
         } else {
           throw fbError;
         }
