@@ -60,6 +60,7 @@ export function DigitalDisplayView({
           <select
             value={selectedRoomId}
             onChange={(e) => setSelectedRoomId(e.target.value)}
+            aria-label="Select Room for Kiosk Display"
             className="px-4 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-extrabold text-indigo-300 outline-none"
           >
             {rooms.map(r => (
@@ -72,6 +73,7 @@ export function DigitalDisplayView({
               onClick={onCloseKiosk}
               className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 transition-all cursor-pointer"
               title="Exit Kiosk Mode"
+              aria-label="Exit Kiosk Mode"
             >
               <X className="w-4 h-4" />
             </button>

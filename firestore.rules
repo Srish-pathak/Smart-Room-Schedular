@@ -7,38 +7,109 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Check if the user is accessing their own record
+    // Check if user matches document UID
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Safe retrieval of user record
+    function getUserData() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : null;
+    }
+
+    // Check for administrator privileges
+    function isAdmin() {
+      return isAuthenticated() && (
+        (getUserData() != null && getUserData().role == 'admin') ||
+        (request.auth.token.role == 'admin') ||
+        (request.auth.token.email != null && request.auth.token.email.matches('.*admin.*@iitbhu[.]ac[.]in'))
+      );
+    }
+
+    // Check for faculty privileges
+    function isFaculty() {
+      return isAuthenticated() && (
+        isAdmin() ||
+        (getUserData() != null && (getUserData().role == 'faculty' || getUserData().role == 'admin')) ||
+        (request.auth.token.role == 'faculty')
+      );
+    }
+
+    // Check if the current user created this booking
+    function isBookingOwner(bookingData) {
+      return isAuthenticated() && (
+        bookingData.userId == request.auth.uid ||
+        bookingData.creatorEmail == request.auth.token.email ||
+        bookingData.creator_email == request.auth.token.email
+      );
+    }
+
+    // Enforce valid chronological time interval
+    function isValidTimeInterval(data) {
+      return data.startTime is string &&
+             data.endTime is string &&
+             data.startTime < data.endTime;
+    }
+
+    // User Profiles: public directory read, owners and admins can update
     match /users/{userId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
     }
 
+    // Rooms Directory: public read, admin-only mutations
     match /rooms/{roomId} {
       allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Deterministic Atomic Room Schedules & Slot Locks
+    match /room_schedules/{scheduleId} {
+      allow read: if true;
       allow write: if isAuthenticated();
     }
 
+    // Bookings collection
     match /bookings/{bookingId} {
       allow read: if true;
-      allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      
+      // Creation requires chronological validity and ownership
+      allow create: if isAuthenticated() &&
+                       isValidTimeInterval(request.resource.data) &&
+                       (isBookingOwner(request.resource.data) || isAdmin()) &&
+                       (isAdmin() || request.resource.data.status == 'Pending' || request.resource.data.status == 'Approved');
+      
+      // Updates: Admins can update any field (approvals/rejections);
+      // Owners can update their own pending requests or check-in state
+      allow update: if isAdmin() || 
+                       (isBookingOwner(resource.data) && isValidTimeInterval(request.resource.data) &&
+                        (resource.data.status == 'Pending' || request.resource.data.status == resource.data.status));
+
+      // Deletions: Admins or the booking creator
+      allow delete: if isAdmin() || isBookingOwner(resource.data);
     }
 
+    // Notification Feed: notifications dispatched and dismissed by authenticated users
     match /notifications/{notificationId} {
       allow read: if true;
       allow write: if isAuthenticated();
     }
 
+    // Immutable Audit Logs: append-only, read-restricted to admin
     match /audit_logs/{logId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // Append-only immutable logs
     }
 
+    // Campus Facility Maintenance & Issue Feedback
     match /feedback/{feedbackId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
     }
   }
 }

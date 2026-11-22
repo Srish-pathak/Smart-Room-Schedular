@@ -11,9 +11,11 @@ import {
   updateDoc, 
   deleteDoc, 
   query, 
-  where 
+  where,
+  runTransaction 
 } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
+import { findBookingConflicts, validateBookingInterval } from './conflictSolver';
 
 let cachedToken: string | null = localStorage.getItem('iitbhu_smart_jwt_token') || sessionStorage.getItem('iitbhu_smart_jwt_token');
 
@@ -371,66 +373,25 @@ export const bookingsAPI = {
     const roomName = payload.roomName || payload.room_name;
     const startTime = payload.startTime || payload.start_time;
     const endTime = payload.endTime || payload.end_time;
-    const summary = payload.summary || payload.purpose || '';
+    const summary = payload.summary || payload.purpose || 'Room Reservation';
 
-    // Fetch live bookings and rooms for client-side overlap checks
-    const bookingsList = await this.list();
-    const roomsList = await roomsAPI.list();
+    if (!roomId) throw new Error('Room ID is required for reservation.');
 
-    // Prevent double booking check against any approved booking
-    const conflictingBookings = bookingsList.filter((b: any) => {
-      return (
-        b.roomId === roomId &&
-        b.status === 'Approved' &&
-        b.startTime < endTime &&
-        b.endTime > startTime
-      );
-    });
-
-    if (conflictingBookings.length > 0 && !payload.bypassConflict) {
-      const conflict = conflictingBookings[0];
-      
-      // Calculate alternative sister rooms
-      const sisterRooms = roomsList.filter((room: any) => {
-        if (room.id === roomId) return false;
-        const hasConflict = bookingsList.some((b: any) => {
-          return (
-            b.roomId === room.id &&
-            b.status === 'Approved' &&
-            b.startTime < endTime &&
-            b.endTime > startTime
-          );
-        });
-        return !hasConflict;
-      });
-
-      // Calculate advisary postpone time
-      const roomBookingsSameDay = bookingsList
-        .filter((b: any) => b.roomId === roomId && b.startTime >= startTime.split('T')[0])
-        .sort((a: any, b: any) => a.endTime.localeCompare(b.endTime));
-      
-      let advisedTime = endTime;
-      if (roomBookingsSameDay.length > 0) {
-        advisedTime = roomBookingsSameDay[roomBookingsSameDay.length - 1].endTime;
-      }
-
-      throw {
-        status: 409,
-        conflict: {
-          isActive: true,
-          overlappingBooking: {
-            summary: conflict.summary,
-            startTime: conflict.startTime,
-            endTime: conflict.endTime,
-            creatorName: conflict.creatorName,
-          },
-          sisterRooms: sisterRooms.slice(0, 3).map((r: any) => ({ id: r.id, name: r.name, capacity: r.capacity })),
-          advisorVacancyTime: advisedTime
-        }
-      };
+    // 1. Strict time interval and clock validation
+    const intervalCheck = validateBookingInterval(startTime, endTime, currentUser.role === 'admin');
+    if (!intervalCheck.valid) {
+      throw new Error(intervalCheck.error || 'Invalid booking time interval.');
     }
 
     const bookingId = payload.id || payload.bookingId || 'book-' + Math.random().toString(36).substring(2, 9);
+    const dateStr = startTime.split('T')[0];
+    const scheduleDocRef = doc(db, 'room_schedules', `${roomId}_${dateStr}`);
+    const bookingDocRef = doc(db, 'bookings', bookingId);
+
+    // Fetch rooms and existing bookings to populate sister-room suggestions and legacy fallback
+    const roomsList = await roomsAPI.list();
+    const existingBookings = await this.list();
+
     const newBooking = {
       id: bookingId,
       bookingId: bookingId,
@@ -454,13 +415,82 @@ export const bookingsAPI = {
       faculty_id: payload.facultyId || '',
       attendeeEmail: payload.attendeeEmail || '',
       attendee_email: payload.attendeeEmail || '',
-      status: payload.status || 'Pending',
+      status: payload.status || (currentUser.role === 'admin' ? 'Approved' : 'Pending'),
       createdAt: new Date().toISOString(),
       created_at: new Date().toISOString()
     };
 
-    await setDoc(doc(db, 'bookings', bookingId), newBooking);
-    await auditAPI.log('BOOK_CREATE', `Created booking ID "${bookingId}" for "${roomName}" (${summary})`);
+    // 2. Atomic Firestore transaction check-and-write to eliminate race conditions
+    await runTransaction(db, async (transaction) => {
+      const scheduleSnap = await transaction.get(scheduleDocRef);
+      let intervals: any[] = scheduleSnap.exists() ? (scheduleSnap.data()?.intervals || []) : [];
+
+      // Bootstrap schedule intervals from existing approved bookings if document is newly initialized
+      if (!scheduleSnap.exists()) {
+        intervals = existingBookings
+          .filter((b: any) => (b.roomId === roomId || b.room_id === roomId) && 
+                              (b.status === 'Approved' || b.status?.toLowerCase() === 'approved') && 
+                              b.startTime.startsWith(dateStr))
+          .map((b: any) => ({
+            bookingId: b.id,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            status: b.status,
+            summary: b.summary,
+            creatorName: b.creatorName
+          }));
+      }
+
+      // Check for collision against active approved intervals inside the atomic transaction
+      const hasConflict = intervals.some((inv: any) => {
+        if (inv.bookingId === bookingId) return false;
+        const isApproved = inv.status === 'Approved' || inv.status?.toLowerCase() === 'approved';
+        if (!isApproved) return false;
+        return inv.startTime < endTime && inv.endTime > startTime;
+      });
+
+      if (hasConflict && !payload.bypassConflict) {
+        const conflictData = findBookingConflicts(roomId, startTime, endTime, existingBookings, roomsList);
+        const conflictErr: any = new Error('Room reservation collision detected');
+        conflictErr.status = 409;
+        conflictErr.conflict = conflictData || {
+          isActive: true,
+          overlappingBooking: {
+            summary: 'Active Approved Session',
+            startTime,
+            endTime,
+            creatorName: 'Campus User'
+          },
+          sisterRooms: roomsList.filter(r => r.id !== roomId).slice(0, 3).map(r => ({ id: r.id, name: r.name, capacity: r.capacity })),
+          advisorVacancyTime: endTime
+        };
+        throw conflictErr;
+      }
+
+      // Atomically write the schedule slot lock and the booking document
+      const updatedIntervals = [
+        ...intervals.filter((i: any) => i.bookingId !== bookingId),
+        {
+          bookingId,
+          startTime,
+          endTime,
+          status: newBooking.status,
+          summary: newBooking.summary,
+          creatorName: newBooking.creatorName
+        }
+      ];
+
+      transaction.set(scheduleDocRef, {
+        roomId,
+        date: dateStr,
+        intervals: updatedIntervals,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      transaction.set(bookingDocRef, newBooking);
+    });
+
+    await auditAPI.log('BOOK_CREATE', `Created booking ID "${bookingId}" for "${roomName}" (${summary}) [Atomic Transaction]`);
 
     // Synchronize booking with Google Calendar in the background if approved
     if (newBooking.status === 'Approved') {
@@ -491,63 +521,99 @@ export const bookingsAPI = {
   },
 
   async update(id: string, payload: any) {
-    const bookingsList = await this.list();
     const startTime = payload.startTime || payload.start_time;
     const endTime = payload.endTime || payload.end_time;
     const roomId = payload.roomId || payload.room_id;
 
-    const conflictingBookings = bookingsList.filter((b: any) => {
-      if (b.id === id) return false;
-      if (b.roomId !== roomId) return false;
-      return b.status === 'Approved' && startTime < b.endTime && endTime > b.startTime;
-    });
-
-    if (conflictingBookings.length > 0 && !payload.bypassConflict) {
-      const conflict = conflictingBookings[0];
-      throw {
-        status: 409,
-        message: 'Conflict detected: The room is already occupied during these hours.',
-        conflict: {
-          roomName: payload.roomName,
-          startTime: conflict.startTime,
-          endTime: conflict.endTime,
-          creatorName: conflict.creatorName,
-        }
-      };
+    if (startTime && endTime) {
+      const validation = validateBookingInterval(startTime, endTime, true);
+      if (!validation.valid) throw new Error(validation.error);
     }
 
-    const updatedBooking = {
-      roomId,
-      room_id: roomId,
-      roomName: payload.roomName || payload.room_name,
-      room_name: payload.roomName || payload.room_name,
-      summary: payload.summary || payload.purpose || '',
-      purpose: payload.summary || payload.purpose || '',
-      agenda: payload.agenda || '',
-      startTime,
-      start_time: startTime,
-      endTime,
-      end_time: endTime,
-      facultyId: payload.facultyId || '',
-      faculty_id: payload.facultyId || '',
-      attendeeEmail: payload.attendeeEmail || '',
-      attendee_email: payload.attendeeEmail || ''
-    };
+    const bookingDocRef = doc(db, 'bookings', id);
+    const existingBookings = await this.list();
+    const roomsList = await roomsAPI.list();
+    let completeUpdated: any = null;
 
-    await setDoc(doc(db, 'bookings', id), updatedBooking, { merge: true });
-    await auditAPI.log('BOOK_UPDATE', `Updated booking ID "${id}" for "${updatedBooking.roomName}"`);
+    await runTransaction(db, async (transaction) => {
+      const bookingSnap = await transaction.get(bookingDocRef);
+      if (!bookingSnap.exists()) {
+        throw new Error('Booking not found');
+      }
+      const current = bookingSnap.data();
+      const activeRoomId = roomId || current.roomId || current.room_id;
+      const activeStartTime = startTime || current.startTime || current.start_time;
+      const activeEndTime = endTime || current.endTime || current.end_time;
+      const nextStatus = payload.status || current.status || 'Pending';
 
-    // Fetch the updated complete booking and sync
-    getDoc(doc(db, 'bookings', id)).then(snap => {
-      if (snap.exists()) {
-        const fullBooking = snap.data();
-        import('../services/BookingSyncService').then(({ BookingSyncService }) => {
-          BookingSyncService.syncBooking(id, 'update', { id, ...fullBooking });
+      const dateStr = activeStartTime.split('T')[0];
+      const scheduleDocRef = doc(db, 'room_schedules', `${activeRoomId}_${dateStr}`);
+      const scheduleSnap = await transaction.get(scheduleDocRef);
+      let intervals: any[] = scheduleSnap.exists() ? (scheduleSnap.data()?.intervals || []) : [];
+
+      // Check collision if updating to Approved or modifying time of an Approved booking
+      if (nextStatus === 'Approved') {
+        const hasConflict = intervals.some((inv: any) => {
+          if (inv.bookingId === id) return false;
+          const isApproved = inv.status === 'Approved' || inv.status?.toLowerCase() === 'approved';
+          if (!isApproved) return false;
+          return inv.startTime < activeEndTime && inv.endTime > activeStartTime;
+        });
+
+        if (hasConflict && !payload.bypassConflict) {
+          const conflictData = findBookingConflicts(activeRoomId, activeStartTime, activeEndTime, existingBookings, roomsList, id);
+          const conflictErr: any = new Error('Conflict detected: Room is already occupied during these hours.');
+          conflictErr.status = 409;
+          conflictErr.conflict = conflictData;
+          throw conflictErr;
+        }
+      }
+
+      // Update schedule intervals
+      const remainingIntervals = intervals.filter((i: any) => i.bookingId !== id);
+      if (nextStatus !== 'Rejected' && nextStatus !== 'Cancelled') {
+        remainingIntervals.push({
+          bookingId: id,
+          startTime: activeStartTime,
+          endTime: activeEndTime,
+          status: nextStatus,
+          summary: payload.summary || current.summary,
+          creatorName: current.creatorName
         });
       }
+
+      transaction.set(scheduleDocRef, {
+        roomId: activeRoomId,
+        date: dateStr,
+        intervals: remainingIntervals,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      completeUpdated = {
+        ...current,
+        ...payload,
+        startTime: activeStartTime,
+        start_time: activeStartTime,
+        endTime: activeEndTime,
+        end_time: activeEndTime,
+        status: nextStatus,
+        updatedAt: new Date().toISOString()
+      };
+
+      transaction.set(bookingDocRef, completeUpdated, { merge: true });
     });
 
-    return { id, ...updatedBooking };
+    await auditAPI.log('BOOK_UPDATE', `Updated booking ID "${id}" [Atomic Transaction]`);
+
+    // Synchronize update with Google Calendar in the background
+    if (completeUpdated) {
+      const syncAction = completeUpdated.status === 'Rejected' ? 'reject' : (completeUpdated.status === 'Approved' ? 'approve' : 'update');
+      import('../services/BookingSyncService').then(({ BookingSyncService }) => {
+        BookingSyncService.syncBooking(id, syncAction, completeUpdated);
+      });
+    }
+
+    return completeUpdated;
   },
 
   async delete(id: string) {
@@ -561,27 +627,52 @@ export const bookingsAPI = {
     }
 
     const docRef = doc(db, 'bookings', id);
-    const docSnap = await getDoc(docRef);
-    if (!docSnap.exists()) {
-      throw new Error('Reservation not found');
-    }
-    const target = docSnap.data();
+    let targetBooking: any = null;
 
-    if (
-      currentUser.role !== 'admin' &&
-      target.creatorEmail?.toLowerCase() !== currentUser.email.toLowerCase() &&
-      target.creator_email?.toLowerCase() !== currentUser.email.toLowerCase()
-    ) {
-      throw new Error('Unauthorized: Users can only cancel their own reservations.');
-    }
+    await runTransaction(db, async (transaction) => {
+      const docSnap = await transaction.get(docRef);
+      if (!docSnap.exists()) {
+        throw new Error('Reservation not found');
+      }
+      targetBooking = docSnap.data();
 
-    await deleteDoc(docRef);
-    await auditAPI.log('BOOK_CANCEL', `Cancelled booking ID "${id}" for "${target.roomName || target.room_name}"`);
+      if (
+        currentUser.role !== 'admin' &&
+        targetBooking.creatorEmail?.toLowerCase() !== currentUser.email.toLowerCase() &&
+        targetBooking.creator_email?.toLowerCase() !== currentUser.email.toLowerCase() &&
+        targetBooking.userId !== currentUser.uid
+      ) {
+        throw new Error('Unauthorized: Users can only cancel their own reservations.');
+      }
+
+      // Free schedule slot lock
+      const targetRoomId = targetBooking.roomId || targetBooking.room_id;
+      const targetStartTime = targetBooking.startTime || targetBooking.start_time;
+      if (targetRoomId && targetStartTime) {
+        const dateStr = targetStartTime.split('T')[0];
+        const scheduleDocRef = doc(db, 'room_schedules', `${targetRoomId}_${dateStr}`);
+        const scheduleSnap = await transaction.get(scheduleDocRef);
+        if (scheduleSnap.exists()) {
+          const intervals = scheduleSnap.data()?.intervals || [];
+          const remaining = intervals.filter((i: any) => i.bookingId !== id);
+          transaction.set(scheduleDocRef, {
+            intervals: remaining,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
+      }
+
+      transaction.delete(docRef);
+    });
+
+    await auditAPI.log('BOOK_CANCEL', `Cancelled booking ID "${id}" for "${targetBooking?.roomName || targetBooking?.room_name}" [Atomic Transaction]`);
 
     // Synchronize deletion with Google Calendar in the background
-    import('../services/BookingSyncService').then(({ BookingSyncService }) => {
-      BookingSyncService.syncBooking(id, 'delete', { id, ...target });
-    });
+    if (targetBooking) {
+      import('../services/BookingSyncService').then(({ BookingSyncService }) => {
+        BookingSyncService.syncBooking(id, 'delete', { id, ...targetBooking });
+      });
+    }
 
     // Dispatch cancellation notification
     try {
@@ -590,7 +681,7 @@ export const bookingsAPI = {
         id: notifId,
         userId: currentUser.uid || '',
         title: 'Booking Cancelled',
-        message: `The reservation on "${target.roomName || target.room_name}" was cancelled by ${currentUser.fullName || currentUser.name}.`,
+        message: `The reservation on "${targetBooking?.roomName || targetBooking?.room_name}" was cancelled.`,
         type: 'warn',
         read: false,
         createdAt: new Date().toISOString(),
@@ -605,42 +696,15 @@ export const bookingsAPI = {
   },
 
   async approve(id: string) {
-    await setDoc(doc(db, 'bookings', id), { status: 'Approved' }, { merge: true });
-    await auditAPI.log('BOOK_APPROVE', `Approved reservation ID "${id}"`);
-
-    // Synchronize approval with Google Calendar in the background
-    getDoc(doc(db, 'bookings', id)).then(snap => {
-      if (snap.exists()) {
-        const fullBooking = snap.data();
-        import('../services/BookingSyncService').then(({ BookingSyncService }) => {
-          BookingSyncService.syncBooking(id, 'approve', { id, ...fullBooking, status: 'Approved' });
-        });
-      }
-    });
-
-    return { success: true };
+    return this.update(id, { status: 'Approved' });
   },
 
   async reject(id: string, reason: string) {
-    const docRef = doc(db, 'bookings', id);
-    const docSnap = await getDoc(docRef);
-    const target = docSnap.exists() ? docSnap.data() : null;
-
-    await setDoc(docRef, { 
+    return this.update(id, { 
       status: 'Rejected', 
       rejectionReason: reason,
       rejection_reason: reason
-    }, { merge: true });
-    await auditAPI.log('BOOK_REJECT', `Rejected reservation ID "${id}" - Reason: "${reason}"`);
-
-    if (target) {
-      // Synchronize rejection with Google Calendar in the background (will delete calendar event if it existed)
-      import('../services/BookingSyncService').then(({ BookingSyncService }) => {
-        BookingSyncService.syncBooking(id, 'reject', { id, ...target, status: 'Rejected' });
-      });
-    }
-
-    return { success: true };
+    });
   }
 };
 

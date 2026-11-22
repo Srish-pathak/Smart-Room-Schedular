@@ -20,28 +20,8 @@ export const GoogleCalendarService = {
   async fetchCalendarAPI(url: string, options: RequestInit = {}) {
     const token = await GoogleAuthService.getAccessToken();
     
-    // Mock backup to ensure seamless applet preview functionality without real account
     if (!token || token === 'mock_google_workspace_token') {
-      console.info('[GoogleCalendarService] Using mock calendar fallback.');
-      if (options.method === 'POST') {
-        const uniqueId = 'mock-cal-ev-' + Math.random().toString(36).substring(2, 9);
-        return {
-          id: uniqueId,
-          htmlLink: 'https://calendar.google.com',
-          hangoutLink: 'https://meet.google.com/mock-meet-link'
-        };
-      }
-      if (options.method === 'PUT') {
-        return {
-          id: url.split('/').pop()?.split('?')[0] || 'mock-id',
-          htmlLink: 'https://calendar.google.com',
-          hangoutLink: 'https://meet.google.com/mock-meet-link'
-        };
-      }
-      if (options.method === 'DELETE') {
-        return null;
-      }
-      return {};
+      throw new Error('Google Workspace authorization is required. Please connect your Google account in Profile Settings.');
     }
 
     const headers = {

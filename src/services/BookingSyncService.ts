@@ -3,6 +3,9 @@ import { db } from '../firebase/firebase';
 import { GoogleCalendarService } from './GoogleCalendarService';
 import { GoogleAuthService } from './GoogleAuthService';
 
+// In-flight concurrency lock to prevent duplicate sync executions
+const inFlightSyncs = new Set<string>();
+
 export const BookingSyncService = {
   /**
    * Automatically synchronizes a booking operation with Google Calendar in the background.
@@ -12,10 +15,17 @@ export const BookingSyncService = {
     action: 'create' | 'update' | 'delete' | 'approve' | 'reject',
     existingBooking?: any
   ): Promise<void> {
+    const syncKey = `${bookingId}_${action}`;
+    if (inFlightSyncs.has(syncKey)) {
+      console.info(`[BookingSyncService] Concurrent sync already in progress for ${syncKey}. Debouncing.`);
+      return;
+    }
+    inFlightSyncs.add(syncKey);
+
     console.info(`[BookingSyncService] Sync triggered: ${action} for Booking ID: ${bookingId}`);
 
     try {
-      // 1. If action is delete or reject, we delete the event if it exists
+      // 1. If action is delete or reject, remove event from Google Calendar if it exists
       if (action === 'delete' || action === 'reject') {
         const bookingData = existingBooking || await this.fetchBooking(bookingId);
         if (!bookingData) return;
@@ -26,7 +36,7 @@ export const BookingSyncService = {
             await GoogleCalendarService.deleteEvent(eventId);
             console.info(`[BookingSyncService] Successfully deleted Google Event: ${eventId}`);
           } catch (err: any) {
-            console.error('[BookingSyncService] Failed to delete event on Google Calendar:', err);
+            console.warn('[BookingSyncService] Non-fatal error deleting event on Google Calendar:', err);
           }
         }
         return;
@@ -39,20 +49,20 @@ export const BookingSyncService = {
         return;
       }
 
-      // We only sync Approved bookings to Google Calendar
+      // Only Approved bookings are synced to Google Calendar
       if (booking.status !== 'Approved') {
         console.info(`[BookingSyncService] Booking is in ${booking.status} status. Skipping Google Calendar sync.`);
         return;
       }
 
-      // 3. Update status to 'syncing' in Firestore
+      // 3. Mark status as 'syncing'
       await this.updateSyncStatus(bookingId, 'syncing', null, null, null);
 
-      // 4. Check if Google Calendar is authorized
+      // 4. Verify Google Calendar connection
       const isConnected = await GoogleAuthService.isConnected();
       if (!isConnected) {
-        console.info('[BookingSyncService] Google account not connected. Marking as not connected.');
-        await this.updateSyncStatus(bookingId, 'not_synced', null, null, 'Google Account not connected');
+        console.info('[BookingSyncService] Google account not connected. Marking as not_synced.');
+        await this.updateSyncStatus(bookingId, 'not_synced', null, null, 'Google Workspace account not connected. Connect in Profile settings to enable automatic Calendar sync.');
         return;
       }
 
@@ -66,70 +76,64 @@ export const BookingSyncService = {
             building = roomDoc.data()?.building || '';
           }
         } catch (roomErr) {
-          console.warn('[BookingSyncService] Failed to fetch room building info:', roomErr);
+          console.warn('[BookingSyncService] Could not retrieve building info:', roomErr);
         }
       }
 
-      // 6. Map booking to calendar payload
+      // 6. Map booking to calendar event payload
       const payload = {
-        summary: booking.summary || booking.purpose || 'Smart Room Booking',
-        roomName: booking.roomName || booking.room_name || 'Smart Room',
+        summary: booking.summary || booking.purpose || 'Smart Room Reservation',
+        roomName: booking.roomName || booking.room_name || 'Campus Room',
         building,
         startTime: booking.startTime || booking.start_time,
         endTime: booking.endTime || booking.end_time,
         agenda: booking.agenda || '',
-        creatorName: booking.creatorName || booking.creator_name || 'Smart Rooms User',
+        creatorName: booking.creatorName || booking.creator_name || 'IIT BHU Member',
         creatorEmail: booking.creatorEmail || booking.creator_email || '',
         attendeeEmail: booking.attendeeEmail || booking.attendee_email || undefined,
         facultyId: booking.facultyId || booking.faculty_id || undefined,
       };
 
       const existingEventId = booking.google_event_id || booking.calendarEventId;
-
-      let eventResult;
+      let eventResult: any = null;
       let lastError: any = null;
       const maxRetries = 2;
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           if (existingEventId) {
-            // Update Event
+            // Update existing event
             try {
               eventResult = await GoogleCalendarService.updateEvent(existingEventId, payload);
-              console.info(`[BookingSyncService] Updated existing calendar event on attempt ${attempt}: ${existingEventId}`);
+              console.info(`[BookingSyncService] Updated existing Google Calendar event: ${existingEventId}`);
             } catch (updateErr: any) {
-              if (updateErr.message?.includes('404') || updateErr.message?.includes('Not Found')) {
-                console.warn('[BookingSyncService] Google Event not found on server. Creating new one instead.');
+              if (updateErr.message && updateErr.message.includes('404')) {
+                console.info('[BookingSyncService] Event missing on Calendar. Recreating new event...');
                 eventResult = await GoogleCalendarService.createEvent(payload);
               } else {
                 throw updateErr;
               }
             }
           } else {
-            // Create Event
+            // Create brand new event
             eventResult = await GoogleCalendarService.createEvent(payload);
-            console.info(`[BookingSyncService] Created new calendar event on attempt ${attempt}.`);
+            console.info(`[BookingSyncService] Created new Google Calendar event: ${eventResult?.id}`);
           }
-
-          // If succeeded, break out of loop
-          if (eventResult && eventResult.id) {
-            lastError = null;
-            break;
-          }
-        } catch (attemptErr: any) {
-          lastError = attemptErr;
-          console.warn(`[BookingSyncService] Attempt ${attempt} failed: ${attemptErr.message}. Retrying...`);
+          break;
+        } catch (apiErr: any) {
+          lastError = apiErr;
+          console.warn(`[BookingSyncService] Calendar sync attempt ${attempt} failed:`, apiErr);
           if (attempt < maxRetries) {
-            await new Promise((res) => setTimeout(res, 1000 * attempt));
+            await new Promise((res) => setTimeout(res, 1000));
           }
         }
       }
 
-      if (lastError) {
+      if (!eventResult && lastError) {
         throw lastError;
       }
 
-      // 7. Save Event details back to Firestore
+      // 7. Save synced IDs & Meet link back to Firestore
       if (eventResult && eventResult.id) {
         const calLink = eventResult.htmlLink || null;
         const meetLink = eventResult.hangoutLink || null;
@@ -142,20 +146,21 @@ export const BookingSyncService = {
           null,
           meetLink
         );
-        console.info(`[BookingSyncService] Booking synced successfully: ${bookingId}`);
+        console.info(`[BookingSyncService] Booking synchronized successfully: ${bookingId}`);
       } else {
-        throw new Error('No Event ID returned from Google Calendar API');
+        throw new Error('Google Calendar API returned no Event ID.');
       }
-
     } catch (error: any) {
-      console.error(`[BookingSyncService] Synchronization error:`, error);
+      console.error('[BookingSyncService] Synchronization error:', error);
       await this.updateSyncStatus(
         bookingId,
         'failed',
         null,
         null,
-        error.message || 'Unknown calendar sync error'
+        error.message || 'Unknown calendar synchronization error'
       );
+    } finally {
+      inFlightSyncs.delete(syncKey);
     }
   },
 
@@ -178,32 +183,24 @@ export const BookingSyncService = {
   async updateSyncStatus(
     bookingId: string,
     status: 'synced' | 'failed' | 'syncing' | 'not_synced',
-    eventId: string | null,
-    calendarLink: string | null,
-    errorMsg: string | null,
-    meetLink: string | null = null
-  ): Promise<void> {
+    eventId?: string | null,
+    calendarLink?: string | null,
+    error?: string | null,
+    meetLink?: string | null
+  ) {
     try {
-      const docRef = doc(db, 'bookings', bookingId);
       const updates: any = {
         google_sync_status: status,
-        google_sync_error: errorMsg,
+        google_sync_error: error || null,
+        updatedAt: new Date().toISOString(),
       };
+      if (eventId !== undefined) updates.google_event_id = eventId;
+      if (calendarLink !== undefined) updates.google_calendar_link = calendarLink;
+      if (meetLink !== undefined) updates.google_meet_link = meetLink;
 
-      if (eventId) {
-        updates.google_event_id = eventId;
-        updates.calendarEventId = eventId; // Store as requested
-      }
-      if (calendarLink) {
-        updates.google_calendar_link = calendarLink;
-      }
-      if (meetLink) {
-        updates.google_meet_link = meetLink;
-      }
-
-      await updateDoc(docRef, updates);
+      await updateDoc(doc(db, 'bookings', bookingId), updates);
     } catch (err) {
-      console.error('[BookingSyncService] Failed to write sync status to Firestore:', err);
+      console.warn(`[BookingSyncService] Failed to record sync status in Firestore for ${bookingId}:`, err);
     }
-  }
+  },
 };
