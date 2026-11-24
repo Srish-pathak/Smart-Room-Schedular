@@ -1,4 +1,4 @@
-# 🗓️ Smart Room Scheduler
+# Smart Room Scheduler
 
 An interactive, high-performance **Smart Scheduling & Workspace Optimization Dashboard** built for collaborative environments and seamlessly integrated with Google Workspace and Firebase. This application provides real-time workspace allocation, advanced conflict resolution engines, performance metrics, and a fully functional integration hub.
 
